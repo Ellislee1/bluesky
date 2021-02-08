@@ -20,7 +20,7 @@ def defineArea(areaname, areatype, coordinates, top=1e9, bottom=-1e9):
         else:
             return True, 'Currently defined shapes:\n' + \
                 ', '.join(areas)
-    if not coordinates:
+    if len(coordinates)==0:
         if areaname in areas:
             return True, str(areas[areaname])
         else:
