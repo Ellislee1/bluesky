@@ -21,12 +21,15 @@ class Sector():
                 origin = [point["lat"], point["lon"]]
                 coords = []
             string += f' {point["lat"]},{point["lon"]}'
-            coords=np.append(coords,[point["lat"], point["lon"]])
-        coords=np.append(coords,[origin])
-        areafilter.defineArea(areaname=self.name, areatype='POLY', coordinates=np.array(coords))
+            coords = np.append(coords, [point["lat"], point["lon"]])
+        coords = np.append(coords, [origin])
+        areafilter.defineArea(areaname=self.name,
+                              areatype='POLY', coordinates=np.array(coords))
+        # stack(string)
 
 
 def load_sectors(sector_path="sectors/sectors.json"):
+    print("here")
     print("Initilizing Sectors")
     with open(sector_path) as PATH:
         sectors = json.load(PATH)["sectors"]
@@ -37,7 +40,7 @@ def load_sectors(sector_path="sectors/sectors.json"):
 
     for sector in system_sectors:
         system_sectors[sector].initilise()
-        
+
         print(sector+"=", areafilter.hasArea(str(sector)))
 
     return system_sectors
