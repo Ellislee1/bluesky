@@ -297,8 +297,8 @@ class Agent():
         if l_sep <= 50 and l_sep > 0:
             reward -= (1-(l_sep/50))*5
 
-            if v_sep <= 2500:
-                reward -= (1-min((v_sep/2500), 1))*10
+            if v_sep <= 5000:
+                reward -= (1-min((v_sep/5000), 1))*10
 
         if reward == 0 and not action == 0:
             reward -= 10

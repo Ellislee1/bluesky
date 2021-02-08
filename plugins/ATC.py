@@ -129,20 +129,20 @@ class ATC(core.Entity):
 
     def handle_actions(self, actions):
         for i, action in enumerate(actions):
-            if action == 0:
+            if action == 1:
                 stack.stack('{} ALT {}'.format(
-                    traf.id[i], self.get_new_alt(i, self.actions[0])))
-            elif action == 1:
-                stack.stack('{} SPD {}'.format(
-                    traf.id[i], self.get_new_spd(i, self.actions[1])))
-            elif action == 2:
-                pass
+                    traf.id[i], self.get_new_alt(i, self.actions[1])))
             elif action == 3:
                 stack.stack('{} SPD {}'.format(
                     traf.id[i], self.get_new_spd(i, self.actions[3])))
+            elif action == 0:
+                pass
             elif action == 4:
+                stack.stack('{} SPD {}'.format(
+                    traf.id[i], self.get_new_spd(i, self.actions[4])))
+            elif action == 2:
                 stack.stack('{} ALT {}'.format(
-                    traf.id[i], self.get_new_alt(i, self.actions[4])))
+                    traf.id[i], self.get_new_alt(i, self.actions[2])))
             else:
                 print(traf.id[i], "Error")
 
@@ -182,7 +182,7 @@ class ATC(core.Entity):
             self.success, self.fail, self.all_mean_success, np.mean(self.mean_rewards), self.mean_success, self.best)
         self.print_all(string)
 
-        if self.epoch_counter+1 >= self.EPOCHS:
+        if self.epoch_counter+1 >= EPOCHS:
             stack.stack("STOP")
 
         self.epoch_counter += 1
