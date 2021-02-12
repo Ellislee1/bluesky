@@ -23,9 +23,9 @@ class Sector():
             string += f' {point["lat"]},{point["lon"]}'
             coords = np.append(coords, [point["lat"], point["lon"]])
         coords = np.append(coords, [origin])
-        areafilter.defineArea(areaname=self.name,
-                              areatype='POLY', coordinates=np.array(coords))
-        # stack(string)
+        # areafilter.defineArea(areaname=self.name,
+        #                       areatype='POLY', coordinates=np.array(coords))
+        stack(string)
 
 
 def load_sectors(sector_path="sectors/sectors.json"):

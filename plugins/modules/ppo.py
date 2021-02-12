@@ -1,153 +1,108 @@
-# import numba as nb
-import numpy as np
-import torch
-import torch.nn as nn
-# Import the global bluesky objects. Uncomment the ones you need
-from torch.distributions import MultivariateNormal
+from tensorflow import keras
+import tensorflow.keras.backend as K
+import numba as nb
+import numpy
+import tensorflow as tf
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+GAMMA = 0.9
+LEARNING_RATE = 1e-4
+HIDDEN_SIZE = 32
+CLIPPING = 0.2
+LOSS = 1e-5
 
 
-class ActorCritic(nn.Module):
-    def __init__(self, state_size, action_size, action_std):
-        super(ActorCritic, self).__init__()
+@nb.njit()
+# Discounted rewards
+def discount(r, discounted_r, cum_r):
+    for t in range(len(r) - 1, -1, -1):
+        cum_r = r[t] + cum_r * GAMMA
+        discounted_r[t] = cum_r
+    return discounted_r
 
-        self.actor = nn.Sequential(
-            nn.Linear(state_size, 32),
-            nn.Linear(32, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, action_size)
-        )
 
-        self.critic = nn.Sequential(
-            nn.Linear(state_size, 32),
-            nn.Linear(32, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1)
-        )
-
-        self.action_var = torch.full(
-            (action_size,), action_std * action_std).to(device)
-
-    def forward(self):
-        raise NotImplementedError
-
-    def act(self, state, memory):
-        action_mean = self.actor(state)
-        cov_mat = torch.diag(self.action_var).to(device)
-
-        dist = MultivariateNormal(action_mean, cov_mat)
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
-
-        memory.states.append(state)
-        memory.actions.append(action)
-        memory.logprobs.append(action_logprob)
-
-        return action.detach()
-
-    def evaluate(self, state, action):
-        action_mean = self.actor(state)
-
-        action_var = self.action_var.expand_as(action_mean)
-        cov_mat = torch.diag_embed(action_var).to(device)
-
-        dist = MultivariateNormal(action_mean, cov_mat)
-
-        action_logprobs = dist.log_prob(action)
-        dist_entropy = dist.entropy()
-        state_value = self.critic(state)
-
-        return action_logprobs, torch.squeeze(state_value), dist_entropy
+# PPO loss function
+def PPO_loss(advantage, old_prediction):
+    def loss(y_true, y_pred):
+        prob = y_true * y_pred
+        old_prob = y_true * old_prediction
+        r = prob/(old_prob + 1e-10)
+        return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - CLIPPING, max_value=1 + CLIPPING) * advantage) + LOSS * -(prob * K.log(prob + 1e-10)))
+    return loss
 
 
 class PPO:
-    def __init__(self, state_size, action_size, action_std, lr, betas, gamma, K_epochs, eps_clip):
-        self.lr = lr
-        self.betas = betas
-        self.gamma = gamma
-        self.eps_clip = eps_clip
-        self.K_epochs = K_epochs
+    def __init__(self, statesize, num_intruders, actionsize, valuesize):
+        self.statesize = statesize
+        self.num_intruders = num_intruders
+        self.actionsize = actionsize
+        self.valuesize = valuesize
 
-        self.policy = ActorCritic(
-            state_size, action_size, action_std).to(device)
-        self.optimizer = torch.optim.Adam(
-            self.policy.parameters(), lr=self.lr)
+        self.model = self.__build_linear__()
 
-        self.policy_old = ActorCritic(
-            state_size, action_size, action_std).to(device)
-        self.policy_old.load_state_dict(self.policy.state_dict())
+    def __build_linear__(self):
+        # Input of the aircraft of focus
+        _input = keras.layers.Input(
+            shape=(self.statesize,), name='input_state')
 
-        self.MseLoss = nn.MSELoss()
+        # This is the input for the n_closest aircraft
+        _input_context = keras.layers.Input(
+            shape=(self.num_intruders, 5), name='input_context')
 
-        self.policy.eval()
+        # Empty layer
+        empty = keras.layers.Input(shape=(HIDDEN_SIZE,), name='empty')
 
-    def save_model(self, PATH):
-        torch.save(self.policy.state_dict(), PATH)
+        # Input for advantages
+        advantage = keras.layers.Input(shape=(1,), name="advantage")
 
-    def load_model(self, PATH):
-        self.policy.load_state_dict(torch.load(PATH))
-        self.policy_old.load_state_dict(torch.load(PATH))
+        # Input old prediction
+        old_prediction = keras.layers.Input(
+            shape=(self.actionsize,), name='old,predictions')
 
-    def select_action(self, state, memory):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-        return self.policy_old.act(
-            state, memory).cpu().data.numpy().flatten()
+        # Flatten the context layer (As context is passed as an n*m tensor)
+        flatten_context = keras.layers.Flatten()(_input_context)
 
-    def update(self, memory):
-        # Monte Carlo estimate of rewards:
-        rewards = []
-        discounted_reward = 0
+        # Hidden Layers
 
-        for reward, is_terminal in zip(reversed(memory.rewards), reversed(memory.is_terminals)):
-            if is_terminal == 1:
-                discounted_reward = 0
+        # 1st hidden applies to the context only
+        h1 = keras.layers.Dense(
+            HIDDEN_SIZE, activation='relu')(flatten_context)
 
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
+        # Combine the input and the context
+        combine = keras.layers.concatenate([_input, h1], axis=1)
 
-        # Normalizing the rewards:
-        rewards = torch.tensor(rewards).to(device)
-        rewards = ((rewards - rewards.mean()) / (rewards.std() + 1e-5)).float()
+        # Hidden layers 2 & 3 apply to all inputs
+        h2 = keras.layers.Dense(256, activation='relu')(combine)
+        h3 = keras.layers.Dense(256, activation='relu')(h2)
 
-        # convert list to tensor
-        old_states = torch.squeeze(torch.stack(
-            memory.states), 1).to(device).float().detach()
-        old_actions = torch.squeeze(torch.stack(
-            memory.actions), 1).to(device).float().detach()
-        old_logprobs = torch.squeeze(torch.stack(
-            memory.logprobs), 1).to(device).float().detach()
+        # Output layer
+        out = keras.layers.Dense(self.actionsize+1, activation=None)(h3)
 
-        # Optimize policy for K epochs:
-        for _ in range(5):
-            # Evaluating old actions and values :
-            logprobs, state_values, dist_entropy = self.policy.evaluate(
-                old_states, old_actions)
+        # Policy and value layer processing
+        policy = keras.layers.Lambda(
+            lambda x: x[:, :self.actionsize], output_shape=(self.actionsize,))(out)
+        value = keras.layers.Lambda(
+            lambda x: x[:, self.actionsize], output_shape=(self.valuesize,))(out)
 
-            # Finding the ratio (pi_theta / pi_theta__old):
-            ratios = torch.exp(logprobs - old_logprobs.detach()).float()
+        # Policy and value outputs
+        policy_out = keras.layers.Activation(
+            'softmax', name='policy_out')(policy)
+        value_out = keras.layers.Activation(
+            'linear', name='value_out')(value)
 
-            # Finding Surrogate Loss:
-            advantages = rewards - state_values.detach()
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1-self.eps_clip,
-                                1+self.eps_clip) * advantages
-            loss = -(-torch.min(surr1, surr2) + 0.5 *
-                     self.MseLoss(state_values, rewards) - 0.01*dist_entropy)
+        # Optimizer
+        optimizer = keras.optimizers.Adam(lr=LEARNING_RATE)
 
-            loss = loss.float()
-            # take gradient step
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            self.optimizer.step()
+        # Produce the model
+        model = keras.models.Model(inputs=[
+                                   _input, _input_context, empty, advantage, old_prediction], outputs=[policy_out, value_out])
 
-        # Copy new weights into old policy:
-        self.policy_old.load_state_dict(self.policy.state_dict())
+        self.estimator = keras.models.Model(
+            inputs=[_input, _input_context, empty], outputs=[policy_out, value_out])
+
+        # Compile the model
+
+        model.compile(optimizer=optimizer, loss={'policy_out': PPO_loss(
+            advantage=advantage, old_prediction=old_prediction), 'value_out': 'mse'})
+
+        print(model.summary())
+        return model

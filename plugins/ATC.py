@@ -18,15 +18,10 @@ from modules.memory import Memory
 from modules.sectors import load_sectors
 from modules.traffic import Traffic
 
-EPOCHS = 5000
-MAX_AC = 100
-LR = 0.001
-EPS = 0.2
-GAMMA = 0.9
-K_EPOCHS = 12
-ACTION_STD = 0.5
-STATE_SHAPE = 35
-BETAS = (0.9, 0.999)
+EPOCHS = 2500
+MAX_AC = 80
+STATE_SHAPE = 5
+
 
 # PATH = "models/-7781194074839573161-BestModel.md5"
 PATH = "models/" + \
@@ -73,12 +68,12 @@ class ATC(core.Entity):
     def init(self):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_b.json")
-        self.airspace = Airspace(path="nodes/case_b.json")
+            sector_path="sectors/case_c.json")
+        self.airspace = Airspace(path="nodes/case_c.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, 5,
-                           ACTION_STD, LR, BETAS, GAMMA, K_EPOCHS, EPS, PATH=PATH)
+                           5, 5)
 
         self.epoch_counter = 0
         self.success = 0
