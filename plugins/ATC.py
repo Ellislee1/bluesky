@@ -99,68 +99,52 @@ class ATC(core.Entity):
 
     @core.timed_function(name='atc', dt=12)
     def update(self):
+        # Initilize env if not already
         if not self.initilized:
             self.init()
 
+        # Start the epoch timer
         if not self.start:
             self.start = time.perf_counter()
 
+        # Run the spawn command, this creates aircraft in the scenario.
         self.traffic.spawn()
 
+        # Update the sectors each aircraft belongs to
         self.traffic.get_sectors(self.sectors, traf)
 
+        # Run if aircraft are in the traf object
         if len(traf.id) > 0:
-            terminal, actions, reward = self.agent.update(
-                traf, self.traffic, self.memory)
-            self.handle_actions(actions)
-            terminal = self.traffic.handle_terminal(terminal)
-            self.mean_rewards.append(reward)
+            # For each active aircraft
+            for _id in traf.id:
+                idx = traf.id2idx(_id)
+                print(_id, (traf.actwp.lat[idx], traf.actwp.lon[idx]))
+                print(_id, self.traffic.routes[_id])
 
-            if len(terminal) > 0:
-                self.success += sum(1 for i in terminal if i == 1)
-                self.fail += sum(1 for i in terminal if i == 2)
-
+        # See if all aircraft for an epoch have been created, i.e. epoch is finished
         if self.traffic.check_done():
+            # Reset the environment
             self.epoch_reset()
 
-    def handle_actions(self, actions):
-        for i, action in enumerate(actions):
-            if action == 1:
-                stack.stack('{} ALT {}'.format(
-                    traf.id[i], self.get_new_alt(i, self.actions[1])))
-            elif action == 3:
-                stack.stack('{} SPD {}'.format(
-                    traf.id[i], self.get_new_spd(i, self.actions[3])))
-            elif action == 0:
-                pass
-            elif action == 4:
-                stack.stack('{} SPD {}'.format(
-                    traf.id[i], self.get_new_spd(i, self.actions[4])))
-            elif action == 2:
-                stack.stack('{} ALT {}'.format(
-                    traf.id[i], self.get_new_alt(i, self.actions[2])))
-            else:
-                print(traf.id[i], "Error")
-
-    def get_new_alt(self, _idx, change_val):
-        return np.clip((traf.alt[_idx]/ft)+change_val, a_min=22000, a_max=36000)
-
-    def get_new_spd(self, _idx, change_val):
-        return np.clip((traf.cas[_idx]/kts)+change_val, a_min=300, a_max=380)
-
+    # Reset the environment for the next epoch
     def epoch_reset(self):
-
+        # Reset the traffic creation
         self.traffic.reset()
+        # Stop the timer
         self.stop = time.perf_counter()
 
+        # Keep track of all success and failures
         self.all_success.append(self.success)
         self.all_fail.append(self.fail)
 
+        # Calcuate total mean success
         self.all_mean_success = np.mean(self.all_success)
 
+        # Calcuate rolling mean success
         if (self.epoch_counter+1) >= 50:
             self.mean_success = np.mean(self.all_success[-50:])
 
+        # Train the model every 5 epochs
         if (self.epoch_counter+1) % 5 == 0:
             if self.mean_success >= self.best:
                 print('----- Saving New Best Model -----')
@@ -170,8 +154,10 @@ class ATC(core.Entity):
             self.agent.update_PPO(self.memory)
             self.memory.clear_memory()
 
+        # Get the best rolling mean
         self.best = max(self.mean_success, self.best)
 
+        # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)
         self.print_all(string)
         string = "Success: {} | Fail: {} | Mean Success: {:.4f} | Mean Reward {:.2f} | (50) Mean Success Rolling {:.4f} | Best {:.4f}".format(
@@ -186,12 +172,14 @@ class ATC(core.Entity):
             self.format_epoch())
         self.print_all(string)
 
+        # Reset values
         self.success = 0
         self.fail = 0
         self.stop = None
         self.start = None
         self.mean_rewards = []
 
+    # Scripts for printing values
     def print_all(self, string):
         stack.stack(f'ECHO {string}')
         print(string)
