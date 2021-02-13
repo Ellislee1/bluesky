@@ -83,14 +83,6 @@ class Traffic():
             return True
         return False
 
-    def handle_terminal(self, terminal):
-        t = []
-        for _id, _type in terminal:
-            stack("DEL {}".format(_id))
-            self.active -= 1
-            t.append(_type)
-        return t
-
     def get_sectors(self, sectors, traf):
         self.traf_in_sectors = []
 

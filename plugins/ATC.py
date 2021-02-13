@@ -19,7 +19,7 @@ from modules.sectors import load_sectors
 from modules.traffic import Traffic
 
 EPOCHS = 2500
-MAX_AC = 80
+MAX_AC = 40
 STATE_SHAPE = 5
 
 
@@ -113,6 +113,7 @@ class ATC(core.Entity):
         # Update the sectors each aircraft belongs to
         self.traffic.get_sectors(self.sectors, traf)
 
+        terminals = []
         # Run if aircraft are in the traf object
         if len(traf.id) > 0:
             # For each active aircraft
@@ -126,12 +127,25 @@ class ATC(core.Entity):
 
                 sector_ac = list(dict.fromkeys(sector_ac))
 
-                self.agent.act(traf, _id, sector_ac, self.traffic)
+                T = self.agent.terminal(traf, _id, sector_ac, self.traffic)
+                if T > 0:
+                    terminals.append((_id, T))
 
-        # See if all aircraft for an epoch have been created, i.e. epoch is finished
+                    # See if all aircraft for an epoch have been created, i.e. epoch is finished
+        self.handle_terminals(terminals)
         if self.traffic.check_done():
             # Reset the environment
             self.epoch_reset()
+
+    def handle_terminals(self, terminals):
+        for _id, T in terminals:
+            stack.stack("DEL {}".format(_id))
+            self.traffic.active -= 1
+
+            if T == 1:
+                self.fail += 1
+            else:
+                self.success += 1
 
     # Reset the environment for the next epoch
     def epoch_reset(self):
