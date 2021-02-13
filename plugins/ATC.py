@@ -118,8 +118,15 @@ class ATC(core.Entity):
             # For each active aircraft
             for _id in traf.id:
                 idx = traf.id2idx(_id)
-                print(_id, (traf.actwp.lat[idx], traf.actwp.lon[idx]))
-                print(_id, self.traffic.routes[_id])
+                ac_sector = self.traffic.get_in_sectors(_id, traf)
+
+                sector_ac = []
+                for sector in ac_sector:
+                    sector_ac += (self.traffic.get_sector_indexes(sector, _id, traf))
+
+                sector_ac = list(dict.fromkeys(sector_ac))
+
+                self.agent.act(traf, _id, sector_ac, self.traffic)
 
         # See if all aircraft for an epoch have been created, i.e. epoch is finished
         if self.traffic.check_done():

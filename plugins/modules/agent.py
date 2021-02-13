@@ -13,24 +13,29 @@ def get_dist(pos1, pos2):
 # Get the route length to the goal
 def get_goal_dist(_id, traf, traffic):
     idx = traf.id2idx(_id)
-    active_waypoint = [traf.actwp.lat[idx], traf.actwp.lat[idx]]
+    active_waypoint = [traf.actwp.lat[idx], traf.actwp.lon[idx]]
     route = traffic.routes[_id]
 
     start = 0
     found = False
     min_dist = 9999
-    i = -1
+    i = 1
     while not found:
         dist = get_dist(active_waypoint, route[i])
-        if not dist < min_dist:
+        if dist > min_dist:
+            print("Here")
             found = True
-        else:
+        elif dist < min_dist:
             min_dist = dist
-            i += 1
+            start = i
+        i += 1
+        if i >= len(route):
+            found = True
 
     d_goal = 0
     current = [traf.lat[idx], traf.lon[idx]]
-    for i in range(start, len(route)):
+    for i in range(start, len(route)-1):
+        print(get_dist(route[i], current))
         d_goal += get_dist(current, route[i])
         current = route[i]
     return d_goal
@@ -70,7 +75,7 @@ class Agent:
 
         self.model = PPO(statesize, num_intruders, actionsize, valuesize)
 
-    def update(self, traf, _id, local_traf, traffic):
+    def act(self, traf, _id, local_traf, traffic):
         # get ac index in traffic array
         idx = traf.id2idx(_id)
         """
@@ -78,14 +83,14 @@ class Agent:
             1 = collision
             2 = goal reached
         """
-        dist_matrix = get_distance_matrix_ac(traf, _id, local_traf)
+        # dist_matrix = get_distance_matrix_ac(traf, _id, local_traf)
 
-        distance, v_separation = nearest_ac(dist_matrix, _id, traf)
+        # distance, v_separation = nearest_ac(dist_matrix, _id, traf)
 
         d_goal = get_goal_dist(_id, traf, traffic)
         print(_id, d_goal)
         # T = Terminal type
-        T = is_terminal(distance, v_separation, d_goal)
+        # T = is_terminal(distance, v_separation, d_goal)
 
     def is_terminal(self, distance, v_sep, d_goal):
         if d_goal < 12:
