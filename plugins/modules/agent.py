@@ -38,8 +38,9 @@ def get_goal_dist(_id, traf, traffic):
         current = route[i]
     return d_goal
 
-
 # Get a distance matrix
+
+
 def get_distance_matrix_ac(traf, _id, local_traf):
     idx = traf.id2idx(_id)
     distances = []
@@ -104,7 +105,7 @@ class Agent:
 
         self.model = PPO(statesize, num_intruders, actionsize, valuesize)
 
-    def terminal(self, traf, _id, local_traf, traffic):
+    def terminal(self, traf, _id, local_traf, traffic, memory):
         # get ac index in traffic array
         idx = traf.id2idx(_id)
         """
@@ -123,15 +124,22 @@ class Agent:
         else:
             distance, v_separation = -1, -1
 
+        memory.dist_close[_id] = distance
+
         d_goal = get_goal_dist(_id, traf, traffic)
+        memory.dist_goal[_id] = d_goal
+
+        # Linear goal distance
+        g_dist = get_dist([traf.lat[idx], traf.lon[idx]],
+                          traffic.routes[_id][-1])
         # T = Terminal type
         if len(local_traf) <= 0:
-            if d_goal <= 15:
+            if g_dist <= 15:
                 T = 2
             else:
                 T = 0
         else:
-            T = self.is_terminal(distance, v_separation, d_goal)
+            T = self.is_terminal(distance, v_separation, g_dist)
 
         return T
 
@@ -143,3 +151,9 @@ class Agent:
             return 2
 
         return 0
+
+    def get_reward(self):
+        pass
+
+    def store(self):
+        pass

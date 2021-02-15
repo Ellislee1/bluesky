@@ -127,7 +127,8 @@ class ATC(core.Entity):
 
                 sector_ac = list(dict.fromkeys(sector_ac))
 
-                T = self.agent.terminal(traf, _id, sector_ac, self.traffic)
+                T = self.agent.terminal(
+                    traf, _id, sector_ac, self.traffic, self.memory)
                 if T > 0:
                     terminals.append((_id, T))
 
@@ -169,10 +170,10 @@ class ATC(core.Entity):
         if (self.epoch_counter+1) % 5 == 0:
             if self.mean_success >= self.best:
                 print('----- Saving New Best Model -----')
-                self.agent.save(PATH)
+                # self.agent.save(PATH)
 
             print('----- Training Model -----')
-            self.agent.update_PPO(self.memory)
+            # self.agent.update_PPO(self.memory)
             self.memory.clear_memory()
 
         # Get the best rolling mean
@@ -181,8 +182,8 @@ class ATC(core.Entity):
         # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)
         self.print_all(string)
-        string = "Success: {} | Fail: {} | Mean Success: {:.4f} | Mean Reward {:.2f} | (50) Mean Success Rolling {:.4f} | Best {:.4f}".format(
-            self.success, self.fail, self.all_mean_success, np.mean(self.mean_rewards), self.mean_success, self.best)
+        string = "Success: {} | Fail: {} | Mean Success: {:.3f} | Mean Reward {:.2f} | (50) Mean Success Rolling {:.3f} | Best {:.3f}".format(
+            self.success, self.fail, self.all_mean_success/MAX_AC, np.mean(self.mean_rewards), self.mean_success/MAX_AC, self.best/MAX_AC)
         self.print_all(string)
 
         if self.epoch_counter+1 >= EPOCHS:

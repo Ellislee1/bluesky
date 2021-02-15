@@ -6,7 +6,7 @@ from bluesky.tools import areafilter
 
 
 class Traffic():
-    def __init__(self, max_ac=500, times=[10, 15, 20], iata="SWN", types=['A320'], max_spd=320, min_spd=320, max_alt=28000, min_alt=28000, network=None):
+    def __init__(self, max_ac=500, times=[15, 20, 25], iata="SWN", types=['A320'], max_spd=320, min_spd=320, max_alt=28000, min_alt=28000, network=None):
 
         self.max_ac = max_ac
         self.times = times
