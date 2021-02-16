@@ -73,7 +73,8 @@ class ATC(core.Entity):
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, 5,
-                           5, 5)
+                           5)
+        self.max_agents = 0
 
         self.epoch_counter = 0
         self.success = 0
@@ -113,6 +114,7 @@ class ATC(core.Entity):
         # Update the sectors each aircraft belongs to
         self.traffic.get_sectors(self.sectors, traf)
 
+        termina_ac = np.zeros(len(traf.id), dtype=int)
         terminals = []
         # Run if aircraft are in the traf object
         if len(traf.id) > 0:
@@ -127,16 +129,46 @@ class ATC(core.Entity):
 
                 sector_ac = list(dict.fromkeys(sector_ac))
 
-                T = self.agent.terminal(
+                T, nearest_ac = self.agent.terminal(
                     traf, _id, sector_ac, self.traffic, self.memory)
                 if T > 0:
+                    termina_ac[idx] = 1
                     terminals.append((_id, T))
 
-                    # See if all aircraft for an epoch have been created, i.e. epoch is finished
+                try:
+                    self.max_agents = self.memory.store(self.memory.previous_observation[_id], self.memory.previous_action[_id], [np.zeros(
+                        self.memory.previous_observation[_id][0].shape), (self.memory.previous_observation[_id][1].shape)], traf, _id, nearest_ac, T)
+                except Exception as e:
+                    print(f'ERROR: {e}')
+
+                try:
+                    del self.memory.previous_observation[_id]
+                except KeyError:
+                    pass
+
         self.handle_terminals(terminals)
+
+        # See if all aircraft for an epoch have been created, i.e. epoch is finished
         if self.traffic.check_done():
             # Reset the environment
             self.epoch_reset()
+            return
+
+        if not len(traf.id) == 0:
+            next_action = {}
+            state = np.zeros((len(traf.id), 6))
+
+            non_Ts = np.array(traf.id)[termina_ac != 1]
+
+            state[:, 0] = traf.lat
+            state[:, 1] = traf.lon
+            state[:, 2] = traf.alt
+            state[:, 3] = traf.tas
+            state[:, 4] = traf.vs
+            state[:, 5] = traf.trk
+
+            normal_state, context = self.get_normals_states(
+                state, next_action, 6, terminals, self.memory.previous_observation, self.memory.observation)
 
     def handle_terminals(self, terminals):
         for _id, T in terminals:
@@ -220,3 +252,11 @@ class ATC(core.Entity):
 
         epoch_string += str(self.epoch_counter+1)
         return epoch_string
+
+    def get_normals_states(self, state, next_action, no_states, terminal_ac, previous_observation, observation):
+        number_of_aircraft = traf.lat.shape[0]
+
+        normal_state = np.zeros((len(terminal_ac[terminal_ac != 1]), 6))
+
+        size = traf.lat.shape[0]
+        index = np.arange(size).reshape(-1, 1)

@@ -1,8 +1,11 @@
 import numpy as np
 from bluesky.tools.aero import ft
 from bluesky.tools.geo import latlondist, nm
-
+from tensorflow import keras
 from modules.ppo import PPO
+
+
+HIDDEN_SIZE = 32
 
 
 # Get the distance between two points.
@@ -100,7 +103,7 @@ def nearest_ac(dist_matrix, _id, traf):
 
 
 class Agent:
-    def __init__(self, statesize, num_intruders, actionsize, valuesize):
+    def __init__(self, statesize, actionsize, valuesize, num_intruders=5):
         self.num_intruders = num_intruders
 
         self.model = PPO(statesize, num_intruders, actionsize, valuesize)
@@ -141,7 +144,7 @@ class Agent:
         else:
             T = self.is_terminal(distance, v_separation, g_dist)
 
-        return T
+        return T, (distance, v_separation)
 
     def is_terminal(self, distance, v_sep, d_goal):
         if distance <= 5 and v_sep < 2000:
@@ -157,3 +160,16 @@ class Agent:
 
     def store(self):
         pass
+
+    def act(self, state, context):
+        context = context.reshape((state.shape[0], -1, 5))
+
+        if context.shape[1] > self.num_intruders:
+            context = context[:, -self.num_intruders:, :]
+        elif context.shape[1] < self.num_intruders:
+            context = keras.preprocessing.sequence.pad_sequences(
+                context, self.num_intruders, dtype='float32')
+
+        policy, value = self.model.estimator.predict({'input_states': state, 'context': context, 'empty': np.zeros(
+            (state.shape[0], HIDDEN_SIZE))}, batch_size=state.shape[0])
+        return policy, value
