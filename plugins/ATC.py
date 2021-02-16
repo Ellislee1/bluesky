@@ -254,9 +254,4 @@ class ATC(core.Entity):
         return epoch_string
 
     def get_normals_states(self, state, next_action, no_states, terminal_ac, previous_observation, observation):
-        number_of_aircraft = traf.lat.shape[0]
-
-        normal_state = np.zeros((len(terminal_ac[terminal_ac != 1]), 6))
-
-        size = traf.lat.shape[0]
-        index = np.arange(size).reshape(-1, 1)
+        return True, True

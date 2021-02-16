@@ -76,11 +76,15 @@ def get_nearest_n(dist_matrix, _id, traf, local_traf, n=4):
         for i in range(0, min(len(new_dist), n)):
             lat = traf.lat[new_local[i]]
             lon = traf.lon[new_local[i]]
+            alt = traf.alt[new_local[i]]/ft
+            tas = traf.tas[new_local[i]]
+            vs = traf.vs[new_local[i]]
+            trk = traf.trk[new_local[i]]
 
-            closest.append([lat, lon, traf.alt[new_local[i]]/ft, new_dist[i]])
+            closest.append([lat, lon, alt, tas, vs, trk])
     closest = closest
-    for i in range(4-len(closest)):
-        closest.append([0, 0, 0, 0])
+    for i in range(5-len(closest)):
+        closest.append([0, 0, 0, 0, 0, 0])
 
     return closest
 
@@ -90,13 +94,13 @@ def nearest_ac(dist_matrix, _id, traf):
     idx = traf.id2idx(_id)
 
     closest = dist_matrix[0]
-    close = closest[3]
+    close = get_dist([traf.lat[idx], traf.lon[idx]], [
+                     closest[0], closest[1]])
     this_alt = traf.alt[idx]/ft
     close_alt = closest[2]
     alt_separations = abs(this_alt - close_alt)
 
     if close == 0 and alt_separations == this_alt:
-        print(close, "HERE")
         return (-1, -1)
     else:
         return close, alt_separations
