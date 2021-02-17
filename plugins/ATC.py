@@ -8,7 +8,7 @@ from random import randint
 import bluesky
 import numpy as np
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
-from bluesky.tools import areafilter
+from bluesky.tools import geo
 from bluesky.tools.aero import ft, kts
 from bluesky.tools.geo import latlondist, nm
 
@@ -114,39 +114,34 @@ class ATC(core.Entity):
         # Update the sectors each aircraft belongs to
         self.traffic.get_sectors(self.sectors, traf)
 
-        termina_ac = np.zeros(len(traf.id), dtype=int)
-        terminals = []
-        # Run if aircraft are in the traf object
-        if len(traf.id) > 0:
-            # For each active aircraft
-            for _id in traf.id:
-                idx = traf.id2idx(_id)
-                ac_sector = self.traffic.get_in_sectors(_id, traf)
+        terminal_ac = np.zeros(len(traf.id), dtype=int)
+        terminal_id = []
 
-                sector_ac = []
-                for sector in ac_sector:
-                    sector_ac += (self.traffic.get_sector_indexes(sector, _id, traf))
+        # Generate a full distancematrix between each aircraft
+        full_dist_matrix = self.get_dist_martix()
 
-                sector_ac = list(dict.fromkeys(sector_ac))
+        # Loop through and get terminal aircraft
+        for i in range(len(traf.id)):
+            T = 0
+            for x in range(len(self.traffic.traf_in_sectors)):
+                valid = self.traffic.traf_in_sectors[x, i]
+                # Run if AC is in zone, this prevents collisions in uncontrolled zones
+                if valid:
+                    T = self.agent.terminal(
+                        traf, i, self.get_nearest_ac(i, full_dist_matrix), self.traffic, self.memory)
+                    break
+                # When AC is not in a zone
+                else:
+                    T = self.agent.terminal(
+                        traf, i, None, self.traffic, self.memory)
 
-                T, nearest_ac = self.agent.terminal(
-                    traf, _id, sector_ac, self.traffic, self.memory)
-                if T > 0:
-                    termina_ac[idx] = 1
-                    terminals.append((_id, T))
+            # Add T type to terminals
+            if not T == 0:
+                terminal_ac[i] = True
+                terminal_id.append([traf.id[i], T])
 
-                try:
-                    self.max_agents = self.memory.store(self.memory.previous_observation[_id], self.memory.previous_action[_id], [np.zeros(
-                        self.memory.previous_observation[_id][0].shape), (self.memory.previous_observation[_id][1].shape)], traf, _id, nearest_ac, T)
-                except Exception as e:
-                    print(f'ERROR: {e}')
-
-                try:
-                    del self.memory.previous_observation[_id]
-                except KeyError:
-                    pass
-
-        self.handle_terminals(terminals)
+        # Remove all treminal aircraft
+        self.handle_terminals(terminal_id)
 
         # See if all aircraft for an epoch have been created, i.e. epoch is finished
         if self.traffic.check_done():
@@ -154,21 +149,27 @@ class ATC(core.Entity):
             self.epoch_reset()
             return
 
-        if not len(traf.id) == 0:
-            next_action = {}
-            state = np.zeros((len(traf.id), 6))
+    def get_nearest_ac(self, _id, dist_matrix):
+        row = dist_matrix[:, _id]
+        close = 10e+25
+        alt_sep = 0
 
-            non_Ts = np.array(traf.id)[termina_ac != 1]
+        for i, dist in enumerate(row):
+            if i == _id:
+                continue
 
-            state[:, 0] = traf.lat
-            state[:, 1] = traf.lon
-            state[:, 2] = traf.alt
-            state[:, 3] = traf.tas
-            state[:, 4] = traf.vs
-            state[:, 5] = traf.trk
+            if dist < close:
+                close = dist
+                this_alt = traf.alt[_id]
+                close_alt = traf.alt[i]
+                alt_sep = abs(this_alt - close_alt)
 
-            normal_state, context = self.get_normals_states(
-                state, next_action, 6, terminals, self.memory.previous_observation, self.memory.observation)
+        return close, alt_sep
+
+    def get_dist_martix(self):
+        size = traf.lat.shape[0]
+        return geo.latlondist_matrix(np.repeat(traf.lat, size), np.repeat(
+            traf.lon, size), np.tile(traf.lat, size), np.tile(traf.lon, size)).reshape(size, size)
 
     def handle_terminals(self, terminals):
         for _id, T in terminals:
@@ -252,6 +253,3 @@ class ATC(core.Entity):
 
         epoch_string += str(self.epoch_counter+1)
         return epoch_string
-
-    def get_normals_states(self, state, next_action, no_states, terminal_ac, previous_observation, observation):
-        return True, True

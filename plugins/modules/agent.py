@@ -112,43 +112,30 @@ class Agent:
 
         self.model = PPO(statesize, num_intruders, actionsize, valuesize)
 
-    def terminal(self, traf, _id, local_traf, traffic, memory):
+    def terminal(self, traf, i, nearest, traffic, memory):
         # get ac index in traffic array
-        idx = traf.id2idx(_id)
+        _id = traf.id[i]
         """
             0 = not terminal
             1 = collision
             2 = goal reached
         """
-
-        if len(local_traf) > 0:
-            dist_matrix = get_distance_matrix_ac(traf, _id, local_traf)
-
-            nearest_n = get_nearest_n(get_distance_matrix_ac(
-                traf, _id, local_traf), _id, traf, local_traf)
-
-            distance, v_separation = nearest_ac(nearest_n, _id, traf)
+        if nearest:
+            dist, alt = nearest
         else:
-            distance, v_separation = -1, -1
-
-        memory.dist_close[_id] = distance
+            dist, alt = 10e+11, 10e+11
 
         d_goal = get_goal_dist(_id, traf, traffic)
         memory.dist_goal[_id] = d_goal
 
+        memory.dist_close[_id] = dist
         # Linear goal distance
-        g_dist = get_dist([traf.lat[idx], traf.lon[idx]],
+        g_dist = get_dist([traf.lat[i], traf.lon[i]],
                           traffic.routes[_id][-1])
         # T = Terminal type
-        if len(local_traf) <= 0:
-            if g_dist <= 15:
-                T = 2
-            else:
-                T = 0
-        else:
-            T = self.is_terminal(distance, v_separation, g_dist)
+        T = self.is_terminal(dist, alt, g_dist)
 
-        return T, (distance, v_separation)
+        return T
 
     def is_terminal(self, distance, v_sep, d_goal):
         if distance <= 5 and v_sep < 2000:
