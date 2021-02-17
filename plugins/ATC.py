@@ -176,6 +176,9 @@ class ATC(core.Entity):
             state[:, 5] = traf.vs
             state[:, 6] = traf.ax
 
+            normal_state, context = self.get_normals_states(
+                state, next_action, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
+
     def get_nearest_ac(self, _id, dist_matrix):
         row = dist_matrix[:, _id]
         close = 10e+25
@@ -207,6 +210,32 @@ class ATC(core.Entity):
                 self.fail += 1
             else:
                 self.success += 1
+
+    def get_normals_states(self, state, next_action, no_states, terminal, distancematrix, sectors):
+        number_of_aircraft = traf.lat.shape[0]
+
+        normal_state = np.zeros((len(terminal[terminal != 1]), no_states))
+
+        size = traf.lat.shape[0]
+        index = np.arange(size).reshape(-1, 1)
+
+        sort = np.array(np.argsort(distancematrix, axis=1))
+
+        total_closest_states = []
+        routecount = 0
+
+        self.max_agents = 1
+
+        count = 0
+
+        for i in range(distancematrix.shape[0]):
+            # We dont care about aircraft that are terminal (new actions dont hold gravity)
+            # We also dont care about traffic that is not in a sector, as we assume that no collisions can occure outside of controlled space.
+            if terminal[i] == 1 or len(sectors[i]) <= 0:
+                continue
+
+            normal_state[count, :] = agent.normalize_state(
+                state[i], id_=traf.id[i])
 
     # Reset the environment for the next epoch
     def epoch_reset(self):
