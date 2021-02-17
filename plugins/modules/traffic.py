@@ -102,6 +102,18 @@ class Traffic():
 
         return what_sectors
 
+    def get_active(self, traf):
+        active = []
+
+        for i in range(len(traf.id)):
+            temp = []
+            for x, sector in enumerate(self.traf_in_sectors):
+                if sector[i] == True:
+                    temp.append(x)
+            active.append(np.array(temp))
+
+        return np.array(active)
+
     def get_sector_indexes(self, sector_idx, _id, traf):
         idx = traf.id2idx(_id)
         watch_ac = []

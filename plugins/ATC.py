@@ -117,6 +117,8 @@ class ATC(core.Entity):
         terminal_ac = np.zeros(len(traf.id), dtype=int)
         terminal_id = []
 
+        active_sectors = self.traffic.get_active(traf)
+
         # Generate a full distancematrix between each aircraft
         full_dist_matrix = self.get_dist_martix()
 
@@ -140,6 +142,13 @@ class ATC(core.Entity):
                 terminal_ac[i] = True
                 terminal_id.append([traf.id[i], T])
 
+            # try:
+            #     call_sig = traf.id[i]
+            #     self.agent.store(self.memory.previous_observation[call_sig], self.memory.previous_action[call_sig], [np.zeros(
+            #         self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, T)
+            # except Exception as e:
+            #     print(f'ERROR: ', e)
+
         # Remove all treminal aircraft
         self.handle_terminals(terminal_id)
 
@@ -148,6 +157,24 @@ class ATC(core.Entity):
             # Reset the environment
             self.epoch_reset()
             return
+
+        if not len(traf.id) == 0:
+            self.next_action = {}
+
+            # lat,lon,alt,tas,trk,vs,ax
+            state = np.zeros((len(traf.id), 7))
+
+            non_T_ids = np.array(traf.id)[terminal_ac != 1]
+
+            indexes = np.array([int(x[3:]) for x in traf.id])
+
+            state[:, 0] = traf.lat
+            state[:, 1] = traf.lon
+            state[:, 2] = traf.alt
+            state[:, 3] = traf.tas
+            state[:, 4] = traf.trk
+            state[:, 5] = traf.vs
+            state[:, 6] = traf.ax
 
     def get_nearest_ac(self, _id, dist_matrix):
         row = dist_matrix[:, _id]
