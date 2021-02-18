@@ -12,7 +12,7 @@ from bluesky.tools import geo
 from bluesky.tools.aero import ft, kts
 from bluesky.tools.geo import latlondist, nm
 
-from modules.agent import Agent
+from modules.agent import Agent, get_goal_dist
 from modules.airspace import Airspace
 from modules.memory import Memory
 from modules.sectors import load_sectors
@@ -61,6 +61,14 @@ class ATC(core.Entity):
     def __init__(self):
         super().__init__()
         self.initilized = False
+
+        self.max_alt = 36000
+        self.min_alt = 28000
+
+        self.max_tas = -1
+        self.min_tas = 0
+
+        self.max_d = 0
 
     # Functions that need to be called periodically can be indicated to BlueSky
     # with the timed_function decorator
@@ -176,8 +184,10 @@ class ATC(core.Entity):
             state[:, 5] = traf.vs
             state[:, 6] = traf.ax
 
-            normal_state, context = self.get_normals_states(
-                state, next_action, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
+            # normal_state, context = self.get_normals_states(
+            #     state, next_action, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
+            self.get_normals_states(
+                state, 6, terminal_ac, full_dist_matrix, active_sectors)
 
     def get_nearest_ac(self, _id, dist_matrix):
         row = dist_matrix[:, _id]
@@ -211,7 +221,7 @@ class ATC(core.Entity):
             else:
                 self.success += 1
 
-    def get_normals_states(self, state, next_action, no_states, terminal, distancematrix, sectors):
+    def get_normals_states(self, state, no_states, terminal, distancematrix, sectors):
         number_of_aircraft = traf.lat.shape[0]
 
         normal_state = np.zeros((len(terminal[terminal != 1]), no_states))
@@ -234,8 +244,36 @@ class ATC(core.Entity):
             if terminal[i] == 1 or len(sectors[i]) <= 0:
                 continue
 
-            normal_state[count, :] = agent.normalize_state(
-                state[i], id_=traf.id[i])
+            normal_state[count, :] = self.normalise_state(
+                state[i], _id=traf.id[i])
+
+            count += 1
+
+        print(normal_state)
+
+    def normalise_state(self, state, _id):
+        dist = get_goal_dist(_id, traf, self.traffic)
+        self.max_d = max(self.max_d, dist)
+        goal_d = dist/self.max_d
+
+        alt = self.normalise_alt(state[2])
+        tas = self.normalise_tas(state[3])
+        trk = self.normalise_trk(state[4])
+        vs = state[5]
+        ax = state[6]
+
+        return np.array([goal_d, alt, tas, trk, vs, ax])
+
+    def normalise_alt(self, alt):
+        return (alt-self.min_alt)/(self.max_alt-self.min_alt)
+
+    def normalise_tas(self, tas):
+        self.max_tas = max(self.max_tas, tas)
+
+        return (tas-self.min_tas)/(self.max_tas-self.min_tas)
+
+    def normalise_trk(self, trk):
+        return (trk)/(360)
 
     # Reset the environment for the next epoch
     def epoch_reset(self):
