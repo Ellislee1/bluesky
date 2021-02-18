@@ -146,12 +146,6 @@ class Agent:
 
         return 0
 
-    def get_reward(self):
-        pass
-
-    def store(self):
-        pass
-
     def act(self, state, context):
         context = context.reshape((state.shape[0], -1, 7))
 
@@ -164,5 +158,4 @@ class Agent:
         policy, value = self.model.estimator.predict({'input_state': state, 'input_context': context, 'empty': np.zeros(
             (state.shape[0], HIDDEN_SIZE))}, batch_size=state.shape[0])
 
-        print(policy, value)
         return policy, value

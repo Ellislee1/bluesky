@@ -16,7 +16,7 @@ class Memory:
         self.dist_close = {}
         self.previous_observation = {}
         self.previous_action = {}
-        self.experience = {}
+        # self.experience = {}
         self.observation = {}
 
     def store(self, state, action, next_state, traf, _id, nearest_ac, T=0, max_agents=0):
@@ -40,8 +40,8 @@ class Memory:
 
         state, context = state
 
-        state.reshape((1, 5))
-        context = context.reshape(1, -1, 5)
+        state.reshape((1, 6))
+        context = context.reshape(1, -1, 7)
 
         if context.shape[1] > 5:
             context = context[:, -5:, :]
@@ -62,7 +62,7 @@ class Memory:
                 self.experience[_id]['context'] = np.append(self.experience[_id]['context'], keras.preprocessing.sequence.pad_sequences(
                     context, max_agents, dtype='float32'), axis=0)
 
-            elf.experience[_id]['action'] = np.append(
+            self.experience[_id]['action'] = np.append(
                 self.experience[_id]['action'], action)
             self.experience[_id]['reward'] = np.append(
                 self.experience[_id]['reward'], reward)

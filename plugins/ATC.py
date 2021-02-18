@@ -139,7 +139,7 @@ class ATC(core.Entity):
                 # Run if AC is in zone, this prevents collisions in uncontrolled zones
                 if valid:
                     T = self.agent.terminal(
-                        traf, i, self.get_nearest_ac(i, full_dist_matrix), self.traffic, self.memory)
+                        traf, i, self.get_nearest_ac(i, full_dist_matrix, active_sectors), self.traffic, self.memory)
                     break
                 # When AC is not in a zone
                 else:
@@ -151,12 +151,16 @@ class ATC(core.Entity):
                 terminal_ac[i] = True
                 terminal_id.append([traf.id[i], T])
 
-            # try:
-            #     call_sig = traf.id[i]
-            #     self.agent.store(self.memory.previous_observation[call_sig], self.memory.previous_action[call_sig], [np.zeros(
-            #         self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, T)
-            # except Exception as e:
-            #     print(f'ERROR: ', e)
+            call_sig = traf.id[i]
+            try:
+                idx = traf.id2idx(call_sig)
+
+                if len(active_sectors[idx]) > 0:
+                    self.memory.store(self.memory.previous_observation[call_sig],
+                                      self.memory.previous_action[call_sig], [np.zeros(self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, self.get_nearest_ac(i, full_dist_matrix, active_sectors), T)
+            except Exception as e:
+                if call_sig in self.memory.previous_action.keys():
+                    print(f'ERROR: ', e)
 
         # Remove all treminal aircraft
         self.handle_terminals(terminal_id)
@@ -168,7 +172,7 @@ class ATC(core.Entity):
             return
 
         if not len(traf.id) == 0:
-            self.next_action = {}
+            next_action = {}
 
             # lat,lon,alt,tas,trk,vs,ax
             state = np.zeros((len(traf.id), 7))
@@ -188,18 +192,55 @@ class ATC(core.Entity):
             normal_state, context = self.get_normals_states(
                 state, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
 
+            # If there is no context dont do anything
             if len(context) == 0:
                 return
 
+            # get the policy and values
             policy, values = self.agent.act(normal_state, context)
 
-    def get_nearest_ac(self, _id, dist_matrix):
+            j = 0
+            for x in range(len(non_T_ids)):
+                _id = non_T_ids[x]
+                idx = traf.id2idx(_id)
+
+                if len(active_sectors[idx]) == 0:
+                    continue
+
+                nearest_ac = self.get_nearest_ac(
+                    j, full_dist_matrix, active_sectors)
+
+                if not _id in self.memory.previous_observation.keys():
+                    self.memory.previous_observation[_id] = [
+                        normal_state[j], context[j]]
+
+                if not _id in self.memory.observation.keys() and _id in self.memory.previous_action.keys():
+                    self.memory.observation[_id] = [
+                        normal_state[j], context[j]]
+
+                    self.memory.store(
+                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac)
+
+                    self.memory.previous_observation[_id] = self.memory.observation[_id]
+
+                    del self.memory.observation[_id]
+
+                action = np.random.choice(
+                    5, 1, p=policy[j].flatten())[0]
+
+                next_action[_id] = action
+
+                j += 1
+
+            self.memory.previous_action = next_action
+
+    def get_nearest_ac(self, _id, dist_matrix, sectors):
         row = dist_matrix[:, _id]
         close = 10e+25
         alt_sep = 0
 
         for i, dist in enumerate(row):
-            if i == _id:
+            if i == _id or len(sectors[i]) == 0:
                 continue
 
             if dist < close:
