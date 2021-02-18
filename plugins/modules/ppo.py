@@ -46,7 +46,7 @@ class PPO:
 
         # This is the input for the n_closest aircraft
         _input_context = keras.layers.Input(
-            shape=(self.num_intruders, 5), name='input_context')
+            shape=(self.num_intruders, 7), name='input_context')
 
         # Empty layer
         empty = keras.layers.Input(shape=(HIDDEN_SIZE,), name='empty')

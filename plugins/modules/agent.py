@@ -153,7 +153,7 @@ class Agent:
         pass
 
     def act(self, state, context):
-        context = context.reshape((state.shape[0], -1, 5))
+        context = context.reshape((state.shape[0], -1, 7))
 
         if context.shape[1] > self.num_intruders:
             context = context[:, -self.num_intruders:, :]
@@ -161,6 +161,8 @@ class Agent:
             context = keras.preprocessing.sequence.pad_sequences(
                 context, self.num_intruders, dtype='float32')
 
-        policy, value = self.model.estimator.predict({'input_states': state, 'context': context, 'empty': np.zeros(
+        policy, value = self.model.estimator.predict({'input_state': state, 'input_context': context, 'empty': np.zeros(
             (state.shape[0], HIDDEN_SIZE))}, batch_size=state.shape[0])
+
+        print(policy, value)
         return policy, value

@@ -11,8 +11,9 @@ from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
 from bluesky.tools import geo
 from bluesky.tools.aero import ft, kts
 from bluesky.tools.geo import latlondist, nm
+from tensorflow import keras
 
-from modules.agent import Agent, get_goal_dist
+from modules.agent import Agent, get_dist, get_goal_dist
 from modules.airspace import Airspace
 from modules.memory import Memory
 from modules.sectors import load_sectors
@@ -20,7 +21,7 @@ from modules.traffic import Traffic
 
 EPOCHS = 2500
 MAX_AC = 40
-STATE_SHAPE = 5
+STATE_SHAPE = 6
 
 
 # PATH = "models/-7781194074839573161-BestModel.md5"
@@ -184,10 +185,13 @@ class ATC(core.Entity):
             state[:, 5] = traf.vs
             state[:, 6] = traf.ax
 
-            # normal_state, context = self.get_normals_states(
-            #     state, next_action, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
-            self.get_normals_states(
-                state, 6, terminal_ac, full_dist_matrix, active_sectors)
+            normal_state, context = self.get_normals_states(
+                state, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
+
+            if len(context) == 0:
+                return
+
+            policy, values = self.agent.act(normal_state, context)
 
     def get_nearest_ac(self, _id, dist_matrix):
         row = dist_matrix[:, _id]
@@ -224,15 +228,20 @@ class ATC(core.Entity):
     def get_normals_states(self, state, no_states, terminal, distancematrix, sectors):
         number_of_aircraft = traf.lat.shape[0]
 
-        normal_state = np.zeros((len(terminal[terminal != 1]), no_states))
+        total_active = 0
+
+        for i in range(len(terminal)):
+            if terminal[i] == 0 and len(sectors[i]) > 0:
+                total_active += 1
+
+        normal_state = np.zeros((total_active, 6))
 
         size = traf.lat.shape[0]
-        index = np.arange(size).reshape(-1, 1)
+        # index = np.arange(size).reshape(-1, 1)
 
         sort = np.array(np.argsort(distancematrix, axis=1))
 
         total_closest_states = []
-        routecount = 0
 
         self.max_agents = 1
 
@@ -241,7 +250,9 @@ class ATC(core.Entity):
         for i in range(distancematrix.shape[0]):
             # We dont care about aircraft that are terminal (new actions dont hold gravity)
             # We also dont care about traffic that is not in a sector, as we assume that no collisions can occure outside of controlled space.
-            if terminal[i] == 1 or len(sectors[i]) <= 0:
+            this_sectors = sectors[i]
+            pos = [traf.lat[i], traf.lon[i]]
+            if terminal[i] == 1 or len(this_sectors) <= 0:
                 continue
 
             normal_state[count, :] = self.normalise_state(
@@ -249,7 +260,64 @@ class ATC(core.Entity):
 
             count += 1
 
-        print(normal_state)
+            closest_states = []
+            intruder_count = 0
+
+            for j in range(len(sort[i])):
+                index = int(sort[i, j])
+
+                # Ignore the agent
+                if i == index:
+                    continue
+
+                # Ignore terminal aircraft or aircraft not in a sector
+                if terminal[index] == 1 or len(sectors[index]) <= 0:
+                    continue
+
+                # Find out if the aircraft shares a sector with the agent (this includes overlaps)
+                flag = False
+                for sector in sectors[j]:
+                    flag = (sector in this_sectors)
+
+                    if flag:
+                        break
+
+                # Ignore aircraft not sharing a sector (this includes overlaps)
+                if not flag:
+                    continue
+
+                self.max_agents = max(self.max_agents, j)
+
+                if len(closest_states) == 0:
+                    closest_states = np.array(
+                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index]])
+
+                    closest_states = self.normalise_context(
+                        closest_states, pos, _id=traf.id[index])
+                else:
+                    adding = np.array(
+                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index]])
+
+                    adding = self.normalise_context(
+                        adding, pos, _id=traf.id[index])
+
+                    closest_states = np.append(closest_states, adding, axis=1)
+
+                intruder_count += 1
+
+                if intruder_count == 5:
+                    break
+
+            if len(closest_states) == 0:
+                closest_states = np.zeros(7).reshape(1, 1, 7)
+
+            if len(total_closest_states) == 0:
+                total_closest_states = closest_states
+            else:
+                total_closest_states = np.append(keras.preprocessing.sequence.pad_sequences(
+                    total_closest_states, 5, dtype='float32'), keras.preprocessing.sequence.pad_sequences(closest_states, 5, dtype='float32'), axis=0)
+
+        return normal_state, total_closest_states
 
     def normalise_state(self, state, _id):
         dist = get_goal_dist(_id, traf, self.traffic)
@@ -263,6 +331,23 @@ class ATC(core.Entity):
         ax = state[6]
 
         return np.array([goal_d, alt, tas, trk, vs, ax])
+
+    def normalise_context(self, state, agent_pos, _id):
+        dist = get_goal_dist(_id, traf, self.traffic)
+        self.max_d = max(self.max_d, dist)
+
+        goal_d = dist/self.max_d
+        alt = self.normalise_alt(state[2])
+        tas = self.normalise_tas(state[3])
+        trk = self.normalise_trk(state[4])
+        vs = state[5]
+        ax = state[6]
+
+        sep = get_dist(agent_pos, [state[0], state[1]])
+        self.max_d = max(sep, self.max_d)
+        sep = sep/self.max_d
+
+        return np.array([dist, alt, tas, trk, vs, ax, sep]).reshape(1, 1, 7)
 
     def normalise_alt(self, alt):
         return (alt-self.min_alt)/(self.max_alt-self.min_alt)
