@@ -1,5 +1,5 @@
-from tensorflow import keras
-import tensorflow.keras.backend as K
+import tensorflow.keras as keras
+import keras.backend as K
 import numba as nb
 import numpy
 import tensorflow as tf
@@ -24,7 +24,7 @@ class PPO:
     def __init__(self, statesize, num_intruders, actionsize, valuesize):
         self.statesize = statesize
         self.num_intruders = num_intruders
-        self.actionsize = actionsize
+        self.actionsize = 5
         self.valuesize = valuesize
 
         self.model = self.__build_linear__()
@@ -71,7 +71,7 @@ class PPO:
         policy = keras.layers.Lambda(
             lambda x: x[:, :self.actionsize], output_shape=(self.actionsize,))(out)
         value = keras.layers.Lambda(
-            lambda x: x[:, self.actionsize], output_shape=(self.valuesize,))(out)
+            lambda x: x[:, self.actionsize:], output_shape=(self.valuesize,))(out)
 
         # Policy and value outputs
         policy_out = keras.layers.Activation(

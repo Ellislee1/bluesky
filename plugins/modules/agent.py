@@ -200,7 +200,6 @@ class Agent:
             discounted_r, cumul_r = np.zeros_like(reward), 0
             discounted_rewards = discount(reward, discounted_r, cumul_r)
 
-            print(state.shape, context.shape)
             policy, values = self.model.estimator.predict(
                 {'input_state': state, 'input_context': context, 'empty': np.zeros((len(state), HIDDEN_SIZE))}, batch_size=256)
 
@@ -236,5 +235,8 @@ class Agent:
                 total_policy = np.append(total_policy, policy, axis=0)
 
         total_A = (total_A - total_A.mean())/(total_A.std() + 1e-8)
-        self.model.fit({'input_state': total_state, 'input_context': total_context, 'empty': np.zeros((total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy}, {
-                       'policy_out': total_advantage, 'value_out': total_reward}, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0)
+
+        print(total_state, total_context, total_A,
+              total_policy, total_advantage, total_reward)
+        self.model.model.fit({'input_state': total_state, 'input_context': total_context, 'empty': np.zeros((total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy}, {
+            'policy_out': total_advantage, 'value_out': total_reward}, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0)
