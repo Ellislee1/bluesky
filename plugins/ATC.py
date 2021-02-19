@@ -98,7 +98,18 @@ class ATC(core.Entity):
         self.start = None
         self.stop = None
 
+        # Actions of Hold current, descend, climb, retard, accelarate
         self.actions = np.array([0, -2000, 2000, -20, 20])
+        self.constraints = {
+            "alt": {
+                "min": 30000,
+                "max": 36000
+            },
+            "spd": {
+                "min": 250,
+                "max": 300
+            }
+        }
 
         print("ATC: READY")
         string = "=================================\n   UPDATE: RUNNING EPOCH {}\n=================================\n".format(
@@ -228,6 +239,8 @@ class ATC(core.Entity):
                 action = np.random.choice(
                     5, 1, p=policy[j].flatten())[0]
 
+                self.act(action, _id)
+
                 next_action[_id] = action
 
                 j += 1
@@ -250,6 +263,29 @@ class ATC(core.Entity):
                 alt_sep = abs(this_alt - close_alt)
 
         return close, alt_sep
+
+    def act(self, action, _id):
+        idx = traf.id2idx(_id)
+        if action == 1 or action == 2:
+            alt = traf.alt[idx]/ft
+            if action == 1:
+                new_alt = max(alt+self.actions[1],
+                              self.constraints["alt"]["min"])
+            else:
+                new_alt = min(alt+self.actions[2],
+                              self.constraints["alt"]["max"])
+            # print(_id, new_alt, action)
+            stack.stack("ALT {} {}".format(_id, new_alt))
+        elif action == 3 or action == 4:
+            spd = traf.cas[idx]/kts
+            if action == 3:
+                new_spd = max(spd+self.actions[3],
+                              self.constraints["spd"]["min"])
+            else:
+                new_spd = min(spd+self.actions[4],
+                              self.constraints["spd"]["max"])
+            # print(_id, new_spd, action)
+            stack.stack("SPD {} {}".format(_id, new_spd))
 
     def get_dist_martix(self):
         size = traf.lat.shape[0]
