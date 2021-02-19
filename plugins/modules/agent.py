@@ -4,11 +4,24 @@ from bluesky.tools.geo import latlondist, nm
 from tensorflow import keras
 from modules.ppo import PPO
 
+import numba as nb
+
 
 HIDDEN_SIZE = 32
+GAMMA = 0.9
 
+
+@nb.njit()
+# Discounted rewards
+def discount(r, discounted_r, cum_r):
+    for t in range(len(r) - 1, -1, -1):
+        cum_r = r[t] + cum_r * GAMMA
+        discounted_r[t] = cum_r
+    return discounted_r
 
 # Get the distance between two points.
+
+
 def get_dist(pos1, pos2):
     return latlondist(pos1[0], pos1[1], pos2[0], pos2[1])/nm
 
@@ -109,8 +122,9 @@ def nearest_ac(dist_matrix, _id, traf):
 class Agent:
     def __init__(self, statesize, actionsize, valuesize, num_intruders=5):
         self.num_intruders = num_intruders
+        self.action_size = actionsize
 
-        self.model = PPO(statesize, num_intruders, actionsize, valuesize)
+        self.model = PPO(statesize, 5, actionsize, valuesize)
 
     def terminal(self, traf, i, nearest, traffic, memory):
         # get ac index in traffic array
@@ -159,3 +173,68 @@ class Agent:
             (state.shape[0], HIDDEN_SIZE))}, batch_size=state.shape[0])
 
         return policy, value
+
+    def train(self, memory):
+        """Grab samples from batch to train the network"""
+
+        total_state = []
+        total_reward = []
+        total_A = []
+        total_advantage = []
+        total_context = []
+        total_policy = []
+
+        total_length = 0
+
+        for transitions in memory.experience.values():
+            episode_length = transitions['state'].shape[0]
+            total_length += episode_length
+
+            # state = transitions['state'].reshape((episode_length,self.state_size))
+            state = transitions['state']
+            context = transitions['context']
+            reward = transitions['reward']
+            done = transitions['done']
+            action = transitions['action']
+
+            discounted_r, cumul_r = np.zeros_like(reward), 0
+            discounted_rewards = discount(reward, discounted_r, cumul_r)
+
+            print(state.shape, context.shape)
+            policy, values = self.model.estimator.predict(
+                {'input_state': state, 'input_context': context, 'empty': np.zeros((len(state), HIDDEN_SIZE))}, batch_size=256)
+
+            advantages = np.zeros((episode_length, self.action_size))
+
+            index = np.arange(episode_length)
+            advantages[index, action] = 1
+            A = discounted_rewards - values[:, 0]
+
+            if len(total_state) == 0:
+                total_state = state
+                if context.shape[1] == memory.max_agents:
+                    total_context = context
+                else:
+                    total_context = keras.preprocessing.sequence.pad_sequences(
+                        context, memory.max_agents, dtype='float32')
+                total_reward = discounted_rewards
+                total_A = A
+                total_advantage = advantages
+                total_policy = policy
+            else:
+                total_state = np.append(total_state, state, axis=0)
+                if context.shape[1] == memory.max_agents:
+                    total_context = np.append(total_context, context, axis=0)
+                else:
+                    total_context = np.append(total_context, keras.preprocessing.sequence.pad_sequences(
+                        context, memory.max_agents, dtype='float32'), axis=0)
+                total_reward = np.append(
+                    total_reward, discounted_rewards, axis=0)
+                total_A = np.append(total_A, A, axis=0)
+                total_advantage = np.append(
+                    total_advantage, advantages, axis=0)
+                total_policy = np.append(total_policy, policy, axis=0)
+
+        total_A = (total_A - total_A.mean())/(total_A.std() + 1e-8)
+        self.model.fit({'input_state': total_state, 'input_context': total_context, 'empty': np.zeros((total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy}, {
+                       'policy_out': total_advantage, 'value_out': total_reward}, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0)

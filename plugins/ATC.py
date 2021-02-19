@@ -21,7 +21,7 @@ from modules.traffic import Traffic
 
 EPOCHS = 2500
 MAX_AC = 40
-STATE_SHAPE = 6
+STATE_SHAPE = 7
 
 
 # PATH = "models/-7781194074839573161-BestModel.md5"
@@ -83,7 +83,6 @@ class ATC(core.Entity):
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, 5,
                            5)
-        self.max_agents = 0
 
         self.epoch_counter = 0
         self.success = 0
@@ -230,7 +229,7 @@ class ATC(core.Entity):
                         normal_state[j], context[j]]
 
                     self.memory.store(
-                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac)
+                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac, )
 
                     self.memory.previous_observation[_id] = self.memory.observation[_id]
 
@@ -311,7 +310,7 @@ class ATC(core.Entity):
             if terminal[i] == 0 and len(sectors[i]) > 0:
                 total_active += 1
 
-        normal_state = np.zeros((total_active, 6))
+        normal_state = np.zeros((total_active, 7))
 
         size = traf.lat.shape[0]
         # index = np.arange(size).reshape(-1, 1)
@@ -319,8 +318,6 @@ class ATC(core.Entity):
         sort = np.array(np.argsort(distancematrix, axis=1))
 
         total_closest_states = []
-
-        self.max_agents = 1
 
         count = 0
 
@@ -362,8 +359,6 @@ class ATC(core.Entity):
                 # Ignore aircraft not sharing a sector (this includes overlaps)
                 if not flag:
                     continue
-
-                self.max_agents = max(self.max_agents, j)
 
                 if len(closest_states) == 0:
                     closest_states = np.array(
@@ -407,7 +402,7 @@ class ATC(core.Entity):
         vs = state[5]
         ax = state[6]
 
-        return np.array([goal_d, alt, tas, trk, vs, ax])
+        return np.array([goal_d, alt, tas, trk, vs, ax, 0])
 
     def normalise_context(self, state, agent_pos, _id):
         dist = get_goal_dist(_id, traf, self.traffic)
@@ -424,7 +419,9 @@ class ATC(core.Entity):
         self.max_d = max(sep, self.max_d)
         sep = sep/self.max_d
 
-        return np.array([dist, alt, tas, trk, vs, ax, sep]).reshape(1, 1, 7)
+        context_array = np.array([dist, alt, tas, trk, vs, ax, sep])
+
+        return context_array.reshape((1, 1, 7))
 
     def normalise_alt(self, alt):
         return (alt-self.min_alt)/(self.max_alt-self.min_alt)
@@ -462,11 +459,19 @@ class ATC(core.Entity):
                 # self.agent.save(PATH)
 
             print('----- Training Model -----')
-            # self.agent.update_PPO(self.memory)
-            self.memory.clear_memory()
+            self.agent.train(self.memory)
+            self.memory.max_agents = 0
+            self.memory.experience = {}
+
+        self.memory.previous_action = {}
+        self.observation = {}
+        self.previous_observation = {}
 
         # Get the best rolling mean
         self.best = max(self.mean_success, self.best)
+
+        np.save('goals_1.npy', np.array(self.all_success))
+        np.save('collision_1.npy', np.array(self.all_fail))
 
         # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)

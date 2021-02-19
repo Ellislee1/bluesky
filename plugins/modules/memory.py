@@ -11,6 +11,8 @@ class Memory:
         self.experience = {}
         self.observation = {}
 
+        self.max_agents = 0
+
     def clear_memory(self):
         self.dist_goal = {}
         self.dist_close = {}
@@ -19,7 +21,7 @@ class Memory:
         # self.experience = {}
         self.observation = {}
 
-    def store(self, state, action, next_state, traf, _id, nearest_ac, T=0, max_agents=0):
+    def store(self, state, action, next_state, traf, _id, nearest_ac, T=0):
         reward = 0
         done = False
 
@@ -40,13 +42,13 @@ class Memory:
 
         state, context = state
 
-        state.reshape((1, 6))
-        context = context.reshape(1, -1, 7)
+        state = state.reshape((1, 7))
+        context = context.reshape((1, -1, 7))
 
         if context.shape[1] > 5:
             context = context[:, -5:, :]
 
-        max_agents = max(max_agents, context.shape[1])
+        self.max_agents = max(self.max_agents, context.shape[1])
 
         if not _id in self.experience.keys():
             self.experience[_id] = {}
@@ -55,12 +57,12 @@ class Memory:
             self.experience[_id]['state'] = np.append(
                 self.experience[_id]['state'], state, axis=0)
 
-            if max_agents > self.experience[_id]['context'].shape[1]:
+            if self.max_agents > self.experience[_id]['context'].shape[1]:
                 self.experience[_id]['context'] = np.append(keras.preprocessing.sequence.pad_sequences(
-                    self.experience[_id]['context'], max_agents, dtype='float32'), context, axis=0)
+                    self.experience[_id]['context'], self.max_agents, dtype='float32'), context, axis=0)
             else:
                 self.experience[_id]['context'] = np.append(self.experience[_id]['context'], keras.preprocessing.sequence.pad_sequences(
-                    context, max_agents, dtype='float32'), axis=0)
+                    context, self.max_agents, dtype='float32'), axis=0)
 
             self.experience[_id]['action'] = np.append(
                 self.experience[_id]['action'], action)
@@ -70,14 +72,12 @@ class Memory:
                 self.experience[_id]['done'], done)
         except:
             self.experience[_id]['state'] = state
-            if max_agents > context.shape[1]:
+            if self.max_agents > context.shape[1]:
                 self.experience[_id]['context'] = keras.preprocessing.sequence.pad_sequences(
-                    context, max_agents, dtype='float32')
+                    context, self.max_agents, dtype='float32')
             else:
                 self.experience[_id]['context'] = context
 
             self.experience[_id]['action'] = [action]
             self.experience[_id]['reward'] = [reward]
             self.experience[_id]['done'] = [done]
-
-        return max_agents

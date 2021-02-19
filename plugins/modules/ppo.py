@@ -4,20 +4,10 @@ import numba as nb
 import numpy
 import tensorflow as tf
 
-GAMMA = 0.9
 LEARNING_RATE = 1e-4
 HIDDEN_SIZE = 32
 CLIPPING = 0.2
 LOSS = 1e-5
-
-
-@nb.njit()
-# Discounted rewards
-def discount(r, discounted_r, cum_r):
-    for t in range(len(r) - 1, -1, -1):
-        cum_r = r[t] + cum_r * GAMMA
-        discounted_r[t] = cum_r
-    return discounted_r
 
 
 # PPO loss function
@@ -56,7 +46,7 @@ class PPO:
 
         # Input old prediction
         old_prediction = keras.layers.Input(
-            shape=(self.actionsize,), name='old,predictions')
+            shape=(self.actionsize,), name='old_predictions')
 
         # Flatten the context layer (As context is passed as an n*m tensor)
         flatten_context = keras.layers.Flatten()(_input_context)
