@@ -21,7 +21,7 @@ from modules.traffic import Traffic
 
 EPOCHS = 2500
 MAX_AC = 40
-STATE_SHAPE = 7
+STATE_SHAPE = 6
 
 
 # PATH = "models/-7781194074839573161-BestModel.md5"
@@ -207,7 +207,7 @@ class ATC(core.Entity):
                 return
 
             # get the policy and values
-            policy, values = self.agent.act(normal_state, context)
+            policy, _ = self.agent.act(normal_state, context)
 
             j = 0
             for x in range(len(non_T_ids)):
@@ -310,7 +310,7 @@ class ATC(core.Entity):
             if terminal[i] == 0 and len(sectors[i]) > 0:
                 total_active += 1
 
-        normal_state = np.zeros((total_active, 7))
+        normal_state = np.zeros((total_active, 6))
 
         size = traf.lat.shape[0]
         # index = np.arange(size).reshape(-1, 1)
@@ -402,7 +402,7 @@ class ATC(core.Entity):
         vs = state[5]
         ax = state[6]
 
-        return np.array([goal_d, alt, tas, trk, vs, ax, 0])
+        return np.array([goal_d, alt, tas, trk, vs, ax])
 
     def normalise_context(self, state, agent_pos, _id):
         dist = get_goal_dist(_id, traf, self.traffic)
@@ -438,8 +438,6 @@ class ATC(core.Entity):
     def epoch_reset(self):
         # Reset the traffic creation
         self.traffic.reset()
-        # Stop the timer
-        self.stop = time.perf_counter()
 
         # Keep track of all success and failures
         self.all_success.append(self.success)
@@ -473,6 +471,8 @@ class ATC(core.Entity):
         np.save('goals_1.npy', np.array(self.all_success))
         np.save('collision_1.npy', np.array(self.all_fail))
 
+        # Stop the timer
+        self.stop = time.perf_counter()
         # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)
         self.print_all(string)

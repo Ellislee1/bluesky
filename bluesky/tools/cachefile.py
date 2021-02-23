@@ -1,5 +1,5 @@
 from os import path
-import pickle
+import pickle5 as pickle
 
 from bluesky import settings
 

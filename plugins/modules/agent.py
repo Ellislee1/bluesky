@@ -1,8 +1,10 @@
 import numpy as np
 from bluesky.tools.aero import ft
 from bluesky.tools.geo import latlondist, nm
+import tensorflow as tf
 from tensorflow import keras
 from modules.ppo import PPO
+from math import ceil
 
 import numba as nb
 
@@ -236,7 +238,9 @@ class Agent:
 
         total_A = (total_A - total_A.mean())/(total_A.std() + 1e-8)
 
-        print(total_state, total_context, total_A,
-              total_policy, total_advantage, total_reward)
-        self.model.model.fit({'input_state': total_state, 'input_context': total_context, 'empty': np.zeros((total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy}, {
-            'policy_out': total_advantage, 'value_out': total_reward}, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0)
+        self.model.model.fit({
+            'input_state': total_state, 'input_context': total_context, 'empty': tf.zeros(shape=(total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy
+        },
+            {
+                'policy_out': tf.cast(total_advantage, tf.float32), 'value_out': tf.cast(total_reward, tf.float32)
+        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=100)

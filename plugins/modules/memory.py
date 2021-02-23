@@ -42,7 +42,7 @@ class Memory:
 
         state, context = state
 
-        state = state.reshape((1, 7))
+        state = state.reshape((1, 6))
         context = context.reshape((1, -1, 7))
 
         if context.shape[1] > 5:

@@ -1,7 +1,5 @@
-import tensorflow.keras as keras
-import keras.backend as K
-import numba as nb
-import numpy
+from tensorflow import keras
+import tensorflow.keras.backend as K
 import tensorflow as tf
 
 LEARNING_RATE = 1e-4
@@ -16,7 +14,12 @@ def PPO_loss(advantage, old_prediction):
         prob = y_true * y_pred
         old_prob = y_true * old_prediction
         r = prob/(old_prob + 1e-10)
-        return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - CLIPPING, max_value=1 + CLIPPING) * advantage) + LOSS * -(prob * K.log(prob + 1e-10)))
+
+        fcn = -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - CLIPPING,
+                                                      max_value=1 + CLIPPING) * advantage) + LOSS * -(prob * K.log(prob + 1e-10)))
+
+        return fcn
+
     return loss
 
 
