@@ -29,27 +29,23 @@ class Memory:
 
         dist, alt = nearest_ac
 
-        if action != 0:
-            reward -= 1000
+        dist_flown = traf.distflown[idx]
 
         if T == 0:
-            # punish actions being taken
 
-            if alt == 0:
-                alt = 1
-
-            if (dist > 5 and alt <= 2500):
-                reward -= min(5/(alt/1000), 500)
-            elif dist <= 5 and alt <= 2500:
-                reward -= min(7.5 / (alt/1000), 1000)
+            if (dist < 10 and alt < 2500):
+                reward -= (1-(alt/2500))**(1-(dist/10))
 
         else:
             done = True
 
             if T == 1:
-                reward -= 10e+5
+                reward -= 5
             elif T == 2:
-                reward = 10e+5
+                reward = 5
+
+        if T == 0 and reward < 0:
+            reward -= 1
 
         state, context = state
 
