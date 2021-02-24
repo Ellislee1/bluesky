@@ -9,7 +9,7 @@ from math import ceil
 import numba as nb
 
 
-HIDDEN_SIZE = 32
+HIDDEN_SIZE = 50
 GAMMA = 0.9
 
 
@@ -116,7 +116,7 @@ def nearest_ac(dist_matrix, _id, traf):
     alt_separations = abs(this_alt - close_alt)
 
     if close == 0 and alt_separations == this_alt:
-        return (-1, -1)
+        return (10e+5, 10e+5)
     else:
         return close, alt_separations
 
@@ -154,16 +154,16 @@ class Agent:
         return T
 
     def is_terminal(self, distance, v_sep, d_goal):
-        if distance <= 5 and v_sep < 2000:
+        if distance <= 5 and v_sep/ft < 2000:
             return 1
 
-        if d_goal <= 15:
+        if d_goal <= 5:
             return 2
 
         return 0
 
     def act(self, state, context):
-        context = context.reshape((state.shape[0], -1, 7))
+        context = context.reshape((state.shape[0], -1, 10))
 
         if context.shape[1] > self.num_intruders:
             context = context[:, -self.num_intruders:, :]
@@ -243,4 +243,4 @@ class Agent:
         },
             {
                 'policy_out': tf.cast(total_advantage, tf.float32), 'value_out': tf.cast(total_reward, tf.float32)
-        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=100)
+        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=10)

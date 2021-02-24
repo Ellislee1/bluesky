@@ -13,15 +13,18 @@ from bluesky.tools.aero import ft, kts
 from bluesky.tools.geo import latlondist, nm
 from tensorflow import keras
 
+from math import cos, sin
+
 from modules.agent import Agent, get_dist, get_goal_dist
 from modules.airspace import Airspace
 from modules.memory import Memory
 from modules.sectors import load_sectors
 from modules.traffic import Traffic
 
-EPOCHS = 2500
-MAX_AC = 40
-STATE_SHAPE = 6
+EPOCHS = 5000
+MAX_AC = 15
+STATE_SHAPE = 9
+ACTION_SHAPE = VALUE_SHAPE = 3
 
 
 # PATH = "models/-7781194074839573161-BestModel.md5"
@@ -77,12 +80,12 @@ class ATC(core.Entity):
     def init(self):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_c.json")
-        self.airspace = Airspace(path="nodes/case_c.json")
+            sector_path="sectors/case_a.0.json")
+        self.airspace = Airspace(path="nodes/case_a.0.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
-        self.agent = Agent(STATE_SHAPE, 5,
-                           5)
+        self.agent = Agent(STATE_SHAPE, ACTION_SHAPE,
+                           VALUE_SHAPE)
 
         self.epoch_counter = 0
         self.success = 0
@@ -98,7 +101,6 @@ class ATC(core.Entity):
         self.stop = None
 
         # Actions of Hold current, descend, climb, retard, accelarate
-        self.actions = np.array([0, -2000, 2000, -20, 20])
         self.constraints = {
             "alt": {
                 "min": 30000,
@@ -109,6 +111,9 @@ class ATC(core.Entity):
                 "max": 300
             }
         }
+
+        self.actions = np.array(
+            [0, self.constraints["alt"]["min"], self.constraints["alt"]["max"]])
 
         print("ATC: READY")
         string = "=================================\n   UPDATE: RUNNING EPOCH {}\n=================================\n".format(
@@ -166,8 +171,8 @@ class ATC(core.Entity):
                 idx = traf.id2idx(call_sig)
 
                 if len(active_sectors[idx]) > 0:
-                    self.memory.store(self.memory.previous_observation[call_sig],
-                                      self.memory.previous_action[call_sig], [np.zeros(self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, self.get_nearest_ac(i, full_dist_matrix, active_sectors), T)
+                    self.mean_rewards.append(self.memory.store(self.memory.previous_observation[call_sig],
+                                                               self.memory.previous_action[call_sig], [np.zeros(self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, self.get_nearest_ac(i, full_dist_matrix, active_sectors), T))
             except Exception as e:
                 if call_sig in self.memory.previous_action.keys():
                     print(f'ERROR: ', e)
@@ -185,7 +190,7 @@ class ATC(core.Entity):
             next_action = {}
 
             # lat,lon,alt,tas,trk,vs,ax
-            state = np.zeros((len(traf.id), 7))
+            state = np.zeros((len(traf.id), 9))
 
             non_T_ids = np.array(traf.id)[terminal_ac != 1]
 
@@ -198,6 +203,8 @@ class ATC(core.Entity):
             state[:, 4] = traf.trk
             state[:, 5] = traf.vs
             state[:, 6] = traf.ax
+            state[:, 7] = traf.actwp.lat
+            state[:, 8] = traf.actwp.lon
 
             normal_state, context = self.get_normals_states(
                 state, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
@@ -228,15 +235,15 @@ class ATC(core.Entity):
                     self.memory.observation[_id] = [
                         normal_state[j], context[j]]
 
-                    self.memory.store(
-                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac, )
+                    self.mean_rewards.append(self.memory.store(
+                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac, T))
 
                     self.memory.previous_observation[_id] = self.memory.observation[_id]
 
                     del self.memory.observation[_id]
 
                 action = np.random.choice(
-                    5, 1, p=policy[j].flatten())[0]
+                    3, 1, p=policy[j].flatten())[0]
 
                 self.act(action, _id)
 
@@ -261,30 +268,17 @@ class ATC(core.Entity):
                 close_alt = traf.alt[i]
                 alt_sep = abs(this_alt - close_alt)
 
-        return close, alt_sep
+        return close, alt_sep/ft
 
     def act(self, action, _id):
         idx = traf.id2idx(_id)
         if action == 1 or action == 2:
+            stack.stack("ALT {} {}".format(_id, self.actions[action]))
+        else:
             alt = traf.alt[idx]/ft
-            if action == 1:
-                new_alt = max(alt+self.actions[1],
-                              self.constraints["alt"]["min"])
-            else:
-                new_alt = min(alt+self.actions[2],
-                              self.constraints["alt"]["max"])
-            # print(_id, new_alt, action)
-            stack.stack("ALT {} {}".format(_id, new_alt))
-        elif action == 3 or action == 4:
-            spd = traf.cas[idx]/kts
-            if action == 3:
-                new_spd = max(spd+self.actions[3],
-                              self.constraints["spd"]["min"])
-            else:
-                new_spd = min(spd+self.actions[4],
-                              self.constraints["spd"]["max"])
-            # print(_id, new_spd, action)
-            stack.stack("SPD {} {}".format(_id, new_spd))
+            alt = int(round(alt/1000))*1000
+
+            stack.stack("ALT {} {}".format(_id, alt))
 
     def get_dist_martix(self):
         size = traf.lat.shape[0]
@@ -310,7 +304,7 @@ class ATC(core.Entity):
             if terminal[i] == 0 and len(sectors[i]) > 0:
                 total_active += 1
 
-        normal_state = np.zeros((total_active, 6))
+        normal_state = np.zeros((total_active, 9))
 
         size = traf.lat.shape[0]
         # index = np.arange(size).reshape(-1, 1)
@@ -362,13 +356,13 @@ class ATC(core.Entity):
 
                 if len(closest_states) == 0:
                     closest_states = np.array(
-                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index]])
+                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index], traf.actwp.lat[index], traf.actwp.lon[index]])
 
                     closest_states = self.normalise_context(
                         closest_states, pos, _id=traf.id[index])
                 else:
                     adding = np.array(
-                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index]])
+                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index], traf.actwp.lat[index], traf.actwp.lon[index]])
 
                     adding = self.normalise_context(
                         adding, pos, _id=traf.id[index])
@@ -381,7 +375,7 @@ class ATC(core.Entity):
                     break
 
             if len(closest_states) == 0:
-                closest_states = np.zeros(7).reshape(1, 1, 7)
+                closest_states = np.zeros(10).reshape(1, 1, 10)
 
             if len(total_closest_states) == 0:
                 total_closest_states = closest_states
@@ -401,8 +395,9 @@ class ATC(core.Entity):
         trk = self.normalise_trk(state[4])
         vs = state[5]
         ax = state[6]
+        x, y, z = self.normalise_nextwpt((state[7], state[8]))
 
-        return np.array([goal_d, alt, tas, trk, vs, ax])
+        return np.array([goal_d, alt, tas, trk, vs, ax, x, y, z])
 
     def normalise_context(self, state, agent_pos, _id):
         dist = get_goal_dist(_id, traf, self.traffic)
@@ -414,14 +409,28 @@ class ATC(core.Entity):
         trk = self.normalise_trk(state[4])
         vs = state[5]
         ax = state[6]
+        x, y, z = self.normalise_nextwpt((state[7], state[8]))
 
         sep = get_dist(agent_pos, [state[0], state[1]])
         self.max_d = max(sep, self.max_d)
         sep = sep/self.max_d
 
-        context_array = np.array([dist, alt, tas, trk, vs, ax, sep])
+        context_array = np.array([dist, alt, tas, trk, vs, ax, sep, x, y, z])
 
-        return context_array.reshape((1, 1, 7))
+        return context_array.reshape((1, 1, 10))
+
+    def normalise_nextwpt(self, next_wpt):
+        lat, lon = next_wpt
+
+        x = cos(lat)*cos(lon)
+        y = cos(lat)*sin(lon)
+        z = sin(lat)
+
+        x = (x+1)/2
+        y = (y+1)/2
+        z = (z+1)/2
+
+        return x, y, z
 
     def normalise_alt(self, alt):
         return (alt-self.min_alt)/(self.max_alt-self.min_alt)

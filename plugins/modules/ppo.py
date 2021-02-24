@@ -3,7 +3,7 @@ import tensorflow.keras.backend as K
 import tensorflow as tf
 
 LEARNING_RATE = 1e-4
-HIDDEN_SIZE = 32
+HIDDEN_SIZE = 50
 CLIPPING = 0.2
 LOSS = 1e-5
 
@@ -27,7 +27,7 @@ class PPO:
     def __init__(self, statesize, num_intruders, actionsize, valuesize):
         self.statesize = statesize
         self.num_intruders = num_intruders
-        self.actionsize = 5
+        self.actionsize = actionsize
         self.valuesize = valuesize
 
         self.model = self.__build_linear__()
@@ -39,7 +39,7 @@ class PPO:
 
         # This is the input for the n_closest aircraft
         _input_context = keras.layers.Input(
-            shape=(self.num_intruders, 7), name='input_context')
+            shape=(self.num_intruders, 10), name='input_context')
 
         # Empty layer
         empty = keras.layers.Input(shape=(HIDDEN_SIZE,), name='empty')
@@ -64,8 +64,8 @@ class PPO:
         combine = keras.layers.concatenate([_input, h1], axis=1)
 
         # Hidden layers 2 & 3 apply to all inputs
-        h2 = keras.layers.Dense(256, activation='relu')(combine)
-        h3 = keras.layers.Dense(256, activation='relu')(h2)
+        h2 = keras.layers.Dense(512, activation='relu')(combine)
+        h3 = keras.layers.Dense(512, activation='relu')(h2)
 
         # Output layer
         out = keras.layers.Dense(self.actionsize+1, activation=None)(h3)

@@ -29,21 +29,32 @@ class Memory:
 
         dist, alt = nearest_ac
 
+        if action != 0:
+            reward -= 1000
+
         if T == 0:
-            if (dist > 5 and alt <= 2500) and (dist != -1):
-                reward -= 0.5 * (alt/1000)
+            # punish actions being taken
+
+            if alt == 0:
+                alt = 1
+
+            if (dist > 5 and alt <= 2500):
+                reward -= min(5/(alt/1000), 500)
             elif dist <= 5 and alt <= 2500:
-                reward -= 0.75 * (alt/1000)
+                reward -= min(7.5 / (alt/1000), 1000)
+
         else:
             done = True
 
             if T == 1:
-                reward -= 2
+                reward -= 10e+5
+            elif T == 2:
+                reward = 10e+5
 
         state, context = state
 
-        state = state.reshape((1, 6))
-        context = context.reshape((1, -1, 7))
+        state = state.reshape((1, 9))
+        context = context.reshape((1, -1, 10))
 
         if context.shape[1] > 5:
             context = context[:, -5:, :]
@@ -81,3 +92,5 @@ class Memory:
             self.experience[_id]['action'] = [action]
             self.experience[_id]['reward'] = [reward]
             self.experience[_id]['done'] = [done]
+
+        return reward
