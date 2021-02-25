@@ -122,11 +122,11 @@ def nearest_ac(dist_matrix, _id, traf):
 
 
 class Agent:
-    def __init__(self, statesize, actionsize, valuesize, num_intruders=5):
+    def __init__(self, statesize, actionsize, valuesize, num_intruders=5, checkpoint="default.ckpt"):
         self.num_intruders = num_intruders
         self.action_size = actionsize
 
-        self.model = PPO(statesize, 5, actionsize, valuesize)
+        self.model = PPO(statesize, 5, actionsize, valuesize, checkpoint)
 
     def terminal(self, traf, i, nearest, traffic, memory):
         # get ac index in traffic array
@@ -238,9 +238,35 @@ class Agent:
 
         total_A = (total_A - total_A.mean())/(total_A.std() + 1e-8)
 
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.model.checkpoint_path,
+                                                         save_weights_only=True,
+                                                         verbose=1)
+
         self.model.model.fit({
             'input_state': total_state, 'input_context': total_context, 'empty': tf.zeros(shape=(total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy
         },
             {
                 'policy_out': tf.cast(total_advantage, tf.float32), 'value_out': tf.cast(total_reward, tf.float32)
-        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=10)
+        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=1, callbacks=[cp_callback])
+
+    def save(self, path="default"):
+        PATH = "models/"+path
+        try:
+            print("Attempting to save model to: {}".format(PATH))
+            self.model.model.save_weights(PATH, save_format="tf")
+            print("Success: Model Saved!")
+        except:
+            print("There was an error saving the model to: {}".format(PATH))
+
+    def load(self, path="default"):
+        PATH = "models/"+path
+        try:
+            print("Attempting to load model from: {}".format(PATH))
+            self.model.model.load_weights(PATH)
+            print("Success: Model Loaded!")
+        except:
+            print("There was an error loading the model from: {}".format(PATH))
+            raise Exception
+
+    def load_checkpoint(self, path="default.ckpt"):
+        pass

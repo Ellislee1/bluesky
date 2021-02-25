@@ -12,6 +12,7 @@ class Memory:
         self.observation = {}
 
         self.max_agents = 0
+        self.max_dist = 1
 
     def clear_memory(self):
         self.dist_goal = {}
@@ -30,22 +31,35 @@ class Memory:
         dist, alt = nearest_ac
 
         dist_flown = traf.distflown[idx]
+        self.max_dist = max(self.max_dist, dist_flown)
+
+        try:
+            dist = int(dist.flatten()[0])
+        except:
+            pass
+
+        try:
+            alt = int(alt.flatten()[0])
+        except:
+            pass
 
         if T == 0:
 
-            if (dist < 10 and alt < 2500):
-                reward -= (1-(alt/2500))**(1-(dist/10))
+            # if (dist <= 25 and alt < 2500):
+            # reward -= (1-(alt/2500))**(1-(dist/25))
+
+            if not action == 0:
+                reward -= 2
+
+            reward += (dist_flown/self.max_dist)*5
 
         else:
             done = True
 
             if T == 1:
-                reward -= 5
-            elif T == 2:
-                reward = 5
-
-        if T == 0 and reward < 0:
-            reward -= 1
+                reward = -500
+            # elif T == 2:
+            #     reward = 5e+10
 
         state, context = state
 

@@ -24,11 +24,12 @@ def PPO_loss(advantage, old_prediction):
 
 
 class PPO:
-    def __init__(self, statesize, num_intruders, actionsize, valuesize):
+    def __init__(self, statesize, num_intruders, actionsize, valuesize, checkpoint):
         self.statesize = statesize
         self.num_intruders = num_intruders
         self.actionsize = actionsize
         self.valuesize = valuesize
+        self.checkpoint_path = "models/training/"+checkpoint
 
         self.model = self.__build_linear__()
 

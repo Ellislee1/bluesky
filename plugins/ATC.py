@@ -22,14 +22,13 @@ from modules.sectors import load_sectors
 from modules.traffic import Traffic
 
 EPOCHS = 5000
-MAX_AC = 15
+MAX_AC = 20
 STATE_SHAPE = 9
 ACTION_SHAPE = VALUE_SHAPE = 3
 
+FILE_NAMES = "default"
+CHECKPOINT_FILE = "training_a.0.ckpt"
 
-# PATH = "models/-7781194074839573161-BestModel.md5"
-PATH = "models/" + \
-    str(hash(datetime.datetime.now()))+"-BestModel.md5"
 
 # Initialization function of your plugin. Do not change the name of this
 # function, as it is the way BlueSky recognises this file as a plugin.
@@ -80,12 +79,20 @@ class ATC(core.Entity):
     def init(self):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_a.0.json")
-        self.airspace = Airspace(path="nodes/case_a.0.json")
+            sector_path="sectors/case_b.2.json")
+        self.airspace = Airspace(path="nodes/case_b.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, ACTION_SHAPE,
-                           VALUE_SHAPE)
+                           VALUE_SHAPE, checkpoint=CHECKPOINT_FILE)
+
+        try:
+            self.agent.load(path=FILE_NAMES+"_best")
+        except:
+            try:
+                self.agent.load(path=FILE_NAMES)
+            except:
+                pass
 
         self.epoch_counter = 0
         self.success = 0
@@ -463,7 +470,10 @@ class ATC(core.Entity):
         if (self.epoch_counter+1) % 5 == 0:
             if self.mean_success >= self.best:
                 print('----- Saving New Best Model -----')
-                # self.agent.save(PATH)
+                self.agent.save(path=FILE_NAMES+"_best")
+
+            print('----- Saving Model -----')
+            self.agent.save(path=FILE_NAMES)
 
             print('----- Training Model -----')
             self.agent.train(self.memory)
