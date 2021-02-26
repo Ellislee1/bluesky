@@ -44,22 +44,23 @@ class Memory:
             pass
 
         if T == 0:
+            pass
 
-            # if (dist <= 25 and alt < 2500):
-            # reward -= (1-(alt/2500))**(1-(dist/25))
+            # if (dist <= 10 and alt < 2500):
+            #     reward -= (1-(alt/2500))**(1-(dist/10))
 
             if not action == 0:
-                reward -= 2
+                reward -= 0.0001
 
-            reward += (dist_flown/self.max_dist)*5
+            # reward += (dist_flown/self.max_dist)*2
 
         else:
             done = True
 
             if T == 1:
-                reward = -500
+                reward = -2000
             # elif T == 2:
-            #     reward = 5e+10
+            #     reward = 2000
 
         state, context = state
 

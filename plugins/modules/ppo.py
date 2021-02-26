@@ -1,6 +1,8 @@
 from tensorflow import keras
 import tensorflow.keras.backend as K
 import tensorflow as tf
+import datetime
+import os
 
 LEARNING_RATE = 1e-4
 HIDDEN_SIZE = 50
@@ -29,7 +31,12 @@ class PPO:
         self.num_intruders = num_intruders
         self.actionsize = actionsize
         self.valuesize = valuesize
-        self.checkpoint_path = "models/training/"+checkpoint
+
+        x = datetime.datetime.now()
+        folder = str(checkpoint[:-6])+str(x.strftime("%Y-%m-%d %H-%M-%S"))
+        os.mkdir("models/training/"+folder)
+
+        self.checkpoint_path = "models/training/"+folder+"/"+checkpoint
 
         self.model = self.__build_linear__()
 
@@ -65,8 +72,8 @@ class PPO:
         combine = keras.layers.concatenate([_input, h1], axis=1)
 
         # Hidden layers 2 & 3 apply to all inputs
-        h2 = keras.layers.Dense(512, activation='relu')(combine)
-        h3 = keras.layers.Dense(512, activation='relu')(h2)
+        h2 = keras.layers.Dense(256, activation='relu')(combine)
+        h3 = keras.layers.Dense(256, activation='relu')(h2)
 
         # Output layer
         out = keras.layers.Dense(self.actionsize+1, activation=None)(h3)

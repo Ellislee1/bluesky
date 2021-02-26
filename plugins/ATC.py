@@ -26,8 +26,8 @@ MAX_AC = 20
 STATE_SHAPE = 9
 ACTION_SHAPE = VALUE_SHAPE = 3
 
-FILE_NAMES = "default"
-CHECKPOINT_FILE = "training_a.0.ckpt"
+FILE_NAMES = "case_b"
+CHECKPOINT_FILE = "training_b.2.ckpt"
 
 
 # Initialization function of your plugin. Do not change the name of this
@@ -279,13 +279,14 @@ class ATC(core.Entity):
 
     def act(self, action, _id):
         idx = traf.id2idx(_id)
+
         if action == 1 or action == 2:
             stack.stack("ALT {} {}".format(_id, self.actions[action]))
-        else:
-            alt = traf.alt[idx]/ft
-            alt = int(round(alt/1000))*1000
+        # else:
+        #     alt = traf.alt[idx]/ft
+        #     alt = int(round(alt/1000))*1000
 
-            stack.stack("ALT {} {}".format(_id, alt))
+        #     stack.stack("ALT {} {}".format(_id, alt))
 
     def get_dist_martix(self):
         size = traf.lat.shape[0]

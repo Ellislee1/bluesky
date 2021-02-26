@@ -1,2 +1,2 @@
-model_checkpoint_path: "default"
-all_model_checkpoint_paths: "default"
+model_checkpoint_path: "case_b"
+all_model_checkpoint_paths: "case_b"
