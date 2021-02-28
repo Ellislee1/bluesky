@@ -47,7 +47,7 @@ class PPO:
 
         # This is the input for the n_closest aircraft
         _input_context = keras.layers.Input(
-            shape=(self.num_intruders, 10), name='input_context')
+            shape=(None, 10), name='input_context')
 
         # Empty layer
         empty = keras.layers.Input(shape=(HIDDEN_SIZE,), name='empty')
@@ -60,16 +60,18 @@ class PPO:
             shape=(self.actionsize,), name='old_predictions')
 
         # Flatten the context layer (As context is passed as an n*m tensor)
-        flatten_context = keras.layers.Flatten()(_input_context)
+        # flatten_context = keras.layers.Flatten()(_input_context)
 
         # Hidden Layers
 
+        h0 = keras.layers.Dense(32, activation='relu')(_input)
+
         # 1st hidden applies to the context only
-        h1 = keras.layers.Dense(
-            HIDDEN_SIZE, activation='relu')(flatten_context)
+        h1 = keras.layers.LSTM(
+            HIDDEN_SIZE, activation='tanh')(_input_context, initial_state=[empty, empty])
 
         # Combine the input and the context
-        combine = keras.layers.concatenate([_input, h1], axis=1)
+        combine = keras.layers.concatenate([h0, h1], axis=1)
 
         # Hidden layers 2 & 3 apply to all inputs
         h2 = keras.layers.Dense(256, activation='relu')(combine)

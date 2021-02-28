@@ -157,7 +157,7 @@ class Agent:
         if distance <= 5 and v_sep/ft < 2000:
             return 1
 
-        if d_goal <= 5:
+        if d_goal <= 10:
             return 2
 
         return 0
@@ -238,16 +238,16 @@ class Agent:
 
         total_A = (total_A - total_A.mean())/(total_A.std() + 1e-8)
 
-        cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.model.checkpoint_path,
-                                                         save_weights_only=True,
-                                                         verbose=1)
+        # cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=self.model.checkpoint_path,
+        #                                                  save_weights_only=True,
+        #                                                  verbose=1)
 
         self.model.model.fit({
             'input_state': total_state, 'input_context': total_context, 'empty': tf.zeros(shape=(total_length, HIDDEN_SIZE)), 'advantage': total_A, 'old_predictions': total_policy
         },
             {
                 'policy_out': tf.cast(total_advantage, tf.float32), 'value_out': tf.cast(total_reward, tf.float32)
-        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=1, callbacks=[cp_callback])
+        }, shuffle=True, batch_size=total_state.shape[0], epochs=8, verbose=0, steps_per_epoch=1, callbacks=[])
 
     def save(self, path="default"):
         PATH = "models/"+path

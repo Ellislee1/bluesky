@@ -22,12 +22,12 @@ from modules.sectors import load_sectors
 from modules.traffic import Traffic
 
 EPOCHS = 5000
-MAX_AC = 20
+MAX_AC = 15
 STATE_SHAPE = 9
 ACTION_SHAPE = VALUE_SHAPE = 3
 
-FILE_NAMES = "case_b"
-CHECKPOINT_FILE = "training_b.2.ckpt"
+FILE_NAMES = "case_a.0"
+CHECKPOINT_FILE = "training_a.0.ckpt"
 
 
 # Initialization function of your plugin. Do not change the name of this
@@ -79,8 +79,8 @@ class ATC(core.Entity):
     def init(self):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_b.2.json")
-        self.airspace = Airspace(path="nodes/case_b.json")
+            sector_path="sectors/case_a.0.json")
+        self.airspace = Airspace(path="nodes/case_a.0.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, ACTION_SHAPE,
@@ -114,8 +114,8 @@ class ATC(core.Entity):
                 "max": 36000
             },
             "spd": {
-                "min": 250,
-                "max": 300
+                "min": 270,
+                "max": 320
             }
         }
 
@@ -156,12 +156,16 @@ class ATC(core.Entity):
         # Loop through and get terminal aircraft
         for i in range(len(traf.id)):
             T = 0
+            n_id = None
             for x in range(len(self.traffic.traf_in_sectors)):
                 valid = self.traffic.traf_in_sectors[x, i]
                 # Run if AC is in zone, this prevents collisions in uncontrolled zones
                 if valid:
+
+                    close, alt, n_id = self.get_nearest_ac(
+                        i, full_dist_matrix, active_sectors)
                     T = self.agent.terminal(
-                        traf, i, self.get_nearest_ac(i, full_dist_matrix, active_sectors), self.traffic, self.memory)
+                        traf, i, (close, alt), self.traffic, self.memory)
                     break
                 # When AC is not in a zone
                 else:
@@ -170,16 +174,25 @@ class ATC(core.Entity):
 
             # Add T type to terminals
             if not T == 0:
-                terminal_ac[i] = True
-                terminal_id.append([traf.id[i], T])
+                if not terminal_ac[i] == True:
+                    terminal_ac[i] = True
+                    terminal_id.append([traf.id[i], T])
+
+                if T == 1 and n_id:
+                    idx = traf.id2idx(n_id)
+                    if not terminal_ac[idx] == True:
+                        terminal_ac[idx] = True
+                        terminal_id.append([n_id, 1])
 
             call_sig = traf.id[i]
             try:
                 idx = traf.id2idx(call_sig)
 
                 if len(active_sectors[idx]) > 0:
-                    self.mean_rewards.append(self.memory.store(self.memory.previous_observation[call_sig],
-                                                               self.memory.previous_action[call_sig], [np.zeros(self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, self.get_nearest_ac(i, full_dist_matrix, active_sectors), T))
+                    close, alt, _ = self.get_nearest_ac(
+                        i, full_dist_matrix, active_sectors)
+                    self.mean_rewards.append(self.memory.store(self.memory.previous_observation[call_sig], self.memory.previous_action[call_sig], [np.zeros(
+                        self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, (close, alt), T))
             except Exception as e:
                 if call_sig in self.memory.previous_action.keys():
                     print(f'ERROR: ', e)
@@ -231,8 +244,10 @@ class ATC(core.Entity):
                 if len(active_sectors[idx]) == 0:
                     continue
 
-                nearest_ac = self.get_nearest_ac(
+                close, alt, _ = self.get_nearest_ac(
                     j, full_dist_matrix, active_sectors)
+
+                nearest_ac = (close, alt)
 
                 if not _id in self.memory.previous_observation.keys():
                     self.memory.previous_observation[_id] = [
@@ -265,6 +280,8 @@ class ATC(core.Entity):
         close = 10e+25
         alt_sep = 0
 
+        nearest_id = None
+
         for i, dist in enumerate(row):
             if i == _id or len(sectors[i]) == 0:
                 continue
@@ -275,7 +292,9 @@ class ATC(core.Entity):
                 close_alt = traf.alt[i]
                 alt_sep = abs(this_alt - close_alt)
 
-        return close, alt_sep/ft
+                nearest_id = traf.id[i]
+
+        return close, alt_sep/ft, nearest_id
 
     def act(self, action, _id):
         idx = traf.id2idx(_id)
@@ -305,6 +324,8 @@ class ATC(core.Entity):
 
     def get_normals_states(self, state, no_states, terminal, distancematrix, sectors):
         number_of_aircraft = traf.lat.shape[0]
+
+        max_agents = 1
 
         total_active = 0
 
@@ -362,6 +383,8 @@ class ATC(core.Entity):
                 if not flag:
                     continue
 
+                max_agents = max(max_agents, j)
+
                 if len(closest_states) == 0:
                     closest_states = np.array(
                         [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index], traf.actwp.lat[index], traf.actwp.lon[index]])
@@ -379,9 +402,6 @@ class ATC(core.Entity):
 
                 intruder_count += 1
 
-                if intruder_count == 5:
-                    break
-
             if len(closest_states) == 0:
                 closest_states = np.zeros(10).reshape(1, 1, 10)
 
@@ -389,7 +409,7 @@ class ATC(core.Entity):
                 total_closest_states = closest_states
             else:
                 total_closest_states = np.append(keras.preprocessing.sequence.pad_sequences(
-                    total_closest_states, 5, dtype='float32'), keras.preprocessing.sequence.pad_sequences(closest_states, 5, dtype='float32'), axis=0)
+                    total_closest_states, max_agents, dtype='float32'), keras.preprocessing.sequence.pad_sequences(closest_states, max_agents, dtype='float32'), axis=0)
 
         return normal_state, total_closest_states
 
@@ -488,8 +508,8 @@ class ATC(core.Entity):
         # Get the best rolling mean
         self.best = max(self.mean_success, self.best)
 
-        np.save('goals_1.npy', np.array(self.all_success))
-        np.save('collision_1.npy', np.array(self.all_fail))
+        np.save('goals_1_a.npy', np.array(self.all_success))
+        np.save('collision_1_a.npy', np.array(self.all_fail))
 
         # Stop the timer
         self.stop = time.perf_counter()
