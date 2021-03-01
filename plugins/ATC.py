@@ -79,8 +79,8 @@ class ATC(core.Entity):
     def init(self):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_a.0.json")
-        self.airspace = Airspace(path="nodes/case_a.0.json")
+            sector_path="sectors/case_b.2.json")
+        self.airspace = Airspace(path="nodes/case_b.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
         self.agent = Agent(STATE_SHAPE, ACTION_SHAPE,
@@ -443,7 +443,7 @@ class ATC(core.Entity):
         self.max_d = max(sep, self.max_d)
         sep = sep/self.max_d
 
-        context_array = np.array([dist, alt, tas, trk, vs, ax, sep, x, y, z])
+        context_array = np.array([goal_d, alt, tas, trk, vs, ax, sep, x, y, z])
 
         return context_array.reshape((1, 1, 10))
 

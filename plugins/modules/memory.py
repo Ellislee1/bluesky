@@ -1,5 +1,6 @@
 import numpy as np
 from tensorflow import keras
+from math import exp
 
 
 class Memory:
@@ -30,45 +31,31 @@ class Memory:
 
         dist, alt = nearest_ac
 
-        dist_flown = traf.distflown[idx]
-        self.max_dist = max(self.max_dist, dist_flown)
-
-        try:
-            dist = int(dist.flatten()[0])
-        except:
-            pass
-
-        try:
-            alt = int(alt.flatten()[0])
-        except:
-            pass
+        dist = float(dist)
 
         if T == 0:
-            pass
 
-            # if (dist <= 10 and alt < 2500):
-            #     reward -= (1-(alt/2500))**(1-(dist/10))
+            if ((dist <= 40 and dist > 5) and alt < 4000):
+                reward -= (0.5*(1-(dist/40)))*(0.5*exp(-2.5*(alt/3000)))
 
             if not action == 0:
-                reward -= 0.0001
-
-            # reward += (dist_flown/self.max_dist)*2
+                reward -= 0.1
 
         else:
             done = True
 
             if T == 1:
-                reward = -2000
-            # elif T == 2:
-            #     reward = 2000
+                reward = -1
+            else:
+                reward = 0
 
         state, context = state
 
         state = state.reshape((1, 9))
         context = context.reshape((1, -1, 10))
 
-        if context.shape[1] > 5:
-            context = context[:, -5:, :]
+        # if context.shape[1] > 5:
+        #     context = context[:, -5:, :]
 
         self.max_agents = max(self.max_agents, context.shape[1])
 
