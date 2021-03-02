@@ -24,10 +24,10 @@ from modules.traffic import Traffic
 EPOCHS = 5000
 MAX_AC = 15
 STATE_SHAPE = 9
-ACTION_SHAPE = VALUE_SHAPE = 3
+ACTION_SHAPE = VALUE_SHAPE = 5
 
-FILE_NAMES = "case_a.0"
-CHECKPOINT_FILE = "training_a.0.ckpt"
+FILE_NAMES = "case_b"
+CHECKPOINT_FILE = "training_b.ckpt"
 
 
 # Initialization function of your plugin. Do not change the name of this
@@ -80,6 +80,7 @@ class ATC(core.Entity):
         # Load the sector bounds
         self.sectors = sectors = load_sectors(
             sector_path="sectors/case_b.2.json")
+
         self.airspace = Airspace(path="nodes/case_b.json")
         self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
         self.memory = Memory()
@@ -120,7 +121,7 @@ class ATC(core.Entity):
         }
 
         self.actions = np.array(
-            [0, self.constraints["alt"]["min"], self.constraints["alt"]["max"]])
+            [0, self.constraints["alt"]["min"], self.constraints["alt"]["max"], self.constraints["spd"]["min"], self.constraints["spd"]["max"]])
 
         print("ATC: READY")
         string = "=================================\n   UPDATE: RUNNING EPOCH {}\n=================================\n".format(
@@ -265,7 +266,7 @@ class ATC(core.Entity):
                     del self.memory.observation[_id]
 
                 action = np.random.choice(
-                    3, 1, p=policy[j].flatten())[0]
+                    5, 1, p=policy[j].flatten())[0]
 
                 self.act(action, _id)
 
@@ -301,11 +302,8 @@ class ATC(core.Entity):
 
         if action == 1 or action == 2:
             stack.stack("ALT {} {}".format(_id, self.actions[action]))
-        # else:
-        #     alt = traf.alt[idx]/ft
-        #     alt = int(round(alt/1000))*1000
-
-        #     stack.stack("ALT {} {}".format(_id, alt))
+        elif action == 3 or action == 4:
+            stack.stack("SPD {} {}".format(_id, self.actions[action]))
 
     def get_dist_martix(self):
         size = traf.lat.shape[0]
@@ -516,7 +514,7 @@ class ATC(core.Entity):
         # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)
         self.print_all(string)
-        string = "Success: {} | Fail: {} | Mean Success: {:.3f} | Mean Reward {:.2f} | (50) Mean Success Rolling {:.3f} | Best {:.3f}".format(
+        string = "Success: {} | Fail: {} | Mean Success: {:.5f} | Mean Reward {:.5f} | (50) Mean Success Rolling {:.5f} | Best {:.5f}".format(
             self.success, self.fail, self.all_mean_success/MAX_AC, np.mean(self.mean_rewards), self.mean_success/MAX_AC, self.best/MAX_AC)
         self.print_all(string)
 

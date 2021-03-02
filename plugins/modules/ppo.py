@@ -32,11 +32,11 @@ class PPO:
         self.actionsize = actionsize
         self.valuesize = valuesize
 
-        x = datetime.datetime.now()
-        folder = str(checkpoint[:-6])+str(x.strftime("%Y-%m-%d %H-%M-%S"))
-        os.mkdir("models/training/"+folder)
+        # x = datetime.datetime.now()
+        # folder = str(checkpoint[:-6])+str(x.strftime("%Y-%m-%d %H-%M-%S"))
+        # os.mkdir("models/training/"+folder)
 
-        self.checkpoint_path = "models/training/"+folder+"/"+checkpoint
+        # self.checkpoint_path = "models/training/"+folder+"/"+checkpoint
 
         self.model = self.__build_linear__()
 

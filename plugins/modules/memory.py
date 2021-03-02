@@ -32,20 +32,21 @@ class Memory:
         dist, alt = nearest_ac
 
         dist = float(dist)
+        alt = float(alt)
 
         if T == 0:
 
             if ((dist <= 40 and dist > 5) and alt < 4000):
-                reward -= (0.5*(1-(dist/40)))*(0.5*exp(-2.5*(alt/3000)))
+                reward -= (0.3*(1-(dist/40)))*(0.5*exp(-2.5*(alt/3000)))
 
             if not action == 0:
                 reward -= 0.1
 
-        else:
+        if not T == 0:
             done = True
 
             if T == 1:
-                reward = -1
+                reward = -1000
             else:
                 reward = 0
 

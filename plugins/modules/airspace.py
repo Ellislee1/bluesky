@@ -3,6 +3,7 @@ from bluesky.stack import stack
 from geographiclib.geodesic import Geodesic
 import json
 import random
+import numpy as np
 
 
 class Airspace():
@@ -11,6 +12,9 @@ class Airspace():
         self.initilise(path)
         # self.draw_routes()
         # self.test_paths()
+        self.array = np.concatenate(
+            (np.array(list(self.airports.keys())), np.array(
+                list(self.nodes.keys()))))
 
     def initilise(self, path):
         with open(path) as PATH:

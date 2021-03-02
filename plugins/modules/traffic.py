@@ -22,6 +22,7 @@ class Traffic():
         self.total = 0
         self.update_timer = 0
         self.routes = {}
+        self.routing = {}
 
         self.first_run = True
 
@@ -38,9 +39,9 @@ class Traffic():
                 if self.update_timer == self.spawn_queue[k]:
                     origin = [*self.network.airports.keys()][k]
 
-                    _, route_coords = self.network.generate_route(origin)
+                    path, route_coords = self.network.generate_route(origin)
 
-                    self.create_ac(route_coords)
+                    self.create_ac(route_coords, path)
                     self.spawn_queue[k] = self.update_timer + \
                         random.choices(self.times, k=1)[0]
 
@@ -52,13 +53,14 @@ class Traffic():
     def first(self):
         for i, origin in enumerate(self.network.airports):
             if self.total < self.max_ac:
-                _, route_coords = self.network.generate_route(origin)
-                self.create_ac(route_coords)
+                path, route_coords = self.network.generate_route(origin)
+                self.create_ac(route_coords, path)
         self.first_run = False
 
-    def create_ac(self, route_coords):
+    def create_ac(self, route_coords, path):
         callsign = self.iata + str(self.total)
         self.routes.update({callsign: route_coords[:]})
+        self.routing.update({callsign: path[:]})
 
         node = route_coords.pop(0)
         ac_type = random.choice(self.types)

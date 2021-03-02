@@ -4,7 +4,7 @@
             {
                 "id": "L2",
                 "lat": 54.04,
-                "lon": -3,
+                "lon": -3.2,
                 "connection": [
                     "LFTM"
                 ]
@@ -20,7 +20,7 @@
             {
                 "id": "R2",
                 "lat": 54.04,
-                "lon": -1.060716,
+                "lon": -0.860716,
                 "connection": [
                     "RGTM"
                 ]
