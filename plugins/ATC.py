@@ -25,15 +25,15 @@ TRAIN = True
 # Visual
 VISUALIZE = True
 # Files
-ROUTES = "routes/routes_b2.json"
-SECTORS = "sectors/sectors_b.2.json"
+ROUTES = "routes/route_a.json"
+SECTORS = "sectors/sectors_a.1.json"
 FILE = "NULL"
 NEW_FILE = "case_a.3"
 # Other
-MAX_AC = 18
+MAX_AC = 12
 EPOCHS = 5000
-# [spd,alt,hdg,vs,acc,d_goal,wp_id1,wp_id2]
-STATE_SHAPE = 9
+# __
+STATE_SHAPE = 6
 # ACTION_SHAPE = 3
 # VALUE_SHAPE = 3
 ACTION_SHAPE = 4
@@ -168,13 +168,14 @@ class ATC(core.Entity):
         full_dist_matrix = self.get_dist_martix()
 
         # Get nearest ac in a matrix
-        nearest_ac = self.get_nearest_ac(dist_matrix=full_dist_matrix)
+        self.nearest_ac = self.get_nearest_ac(dist_matrix=full_dist_matrix)
 
         # Get goal distances for each aircraft
         g_distance = self.get_goal_distances()
 
         # Get an array of terminal aircraft
-        terminal_ac, terminal_id = self.get_terminal(nearest_ac, g_distance)
+        terminal_ac, terminal_id = self.get_terminal(
+            self.nearest_ac, g_distance)
 
         self.handle_terminal(terminal_id)
 
@@ -218,7 +219,7 @@ class ATC(core.Entity):
                                     normal_state[idx], normal_context[idx]]
 
                                 self.memory.store(
-                                    _id, self.last_observation[_id], self.previous_action[_id], nearest_ac[idx])
+                                    _id, self.last_observation[_id], self.previous_action[_id], self.nearest_ac[idx])
 
                                 self.last_observation[_id] = self.observation[_id]
 
@@ -269,8 +270,6 @@ class ATC(core.Entity):
     def get_state(self):
         state = np.zeros((len(traf.id), 6))
 
-        start_ids, end_ids = self.get_all_nodes()
-
         state[:, 0] = traf.lat
         state[:, 1] = traf.lon
         state[:, 2] = traf.trk
@@ -280,28 +279,11 @@ class ATC(core.Entity):
 
         return state
 
-    # Get all nodes for each aircraft
-    def get_all_nodes(self):
-        start_ids = np.zeros(len(traf.id), dtype=int)
-        end_ids = np.zeros(len(traf.id), dtype=int)
-
-        for i in range(len(traf.id)):
-            _id = traf.id[i]
-            route = self.traffic_manager.routes[_id]
-            start_ids[i] = np.argwhere(self.route_manager.idx_array ==
-                                       route[0])
-            end_ids[i] = np.argwhere(self.route_manager.idx_array ==
-                                     route[-1])
-
-        return start_ids, end_ids
-
     # Normalise the state and context
     def normalise_all(self, state, terminal_ac, g_dists, dist_matrix):
         normal_states = self.normalise_state(state, terminal_ac, g_dists)
 
         normal_context = []
-
-        start_ids, end_ids = self.get_all_nodes()
 
         max_agents = 0
         for _id in traf.id:
@@ -309,7 +291,7 @@ class ATC(core.Entity):
                 continue
 
             new_context = self.normalise_context(
-                _id, terminal_ac, dist_matrix, start_ids, end_ids)
+                _id, terminal_ac, dist_matrix)
 
             max_agents = max(max_agents, len(new_context))
 
@@ -320,7 +302,7 @@ class ATC(core.Entity):
                     keras.preprocessing.sequence.pad_sequences(normal_context, max_agents, dtype='float32'), keras.preprocessing.sequence.pad_sequences(new_context, max_agents, dtype='float32'), axis=0)
 
         if len(normal_context) == 0:
-            normal_context = np.array([0, 0, 0, 0, 0, 0, 0]).reshape(1, 1, 7)
+            normal_context = np.array([0, 0, 0, 0, 0, 0]).reshape(1, 1, 6)
 
         # print(normal_states.shape, normal_context.shape)
         return normal_states, normal_context
@@ -341,14 +323,14 @@ class ATC(core.Entity):
                 continue
 
             normalised_state[count, :] = self.normalise(
-                state[i], 'state', traf.id[i], g_dist=g_dists[i])
+                state[i], 'state', traf.id[i], g_dist=get_goal_dist(traf.id[i], self.traffic_manager, self.route_manager))
 
             count += 1
 
         return normalised_state
 
     # Get and normalise context
-    def normalise_context(self, _id, terminal_ac, dist_matrix, start_ids, end_ids):
+    def normalise_context(self, _id, terminal_ac, dist_matrix):
         context = []
         idx = traf.id2idx(_id)
 
@@ -382,19 +364,21 @@ class ATC(core.Entity):
             if dist > 40:
                 continue
 
-            spd = traf.tas[i]
             alt = traf.alt[i]
             trk = traf.trk[i]
             vs = traf.vs[i]
-            start_id = start_ids[i]
-            end_id = end_ids[i]
+            _id = traf.id[i]
+            route_idx = int(_id[3:])
+            route = self.traffic_manager.routes[route_idx]
 
-            self.dist[1] = max(self.dist[1], dist)
-            self.spd[1] = max(self.spd[1], spd)
+            g_dist = get_dist(self.route_manager.all_routes[int(route)]["points"][-1],
+                              [traf.lat[i], traf.lon[i]])
+
+            self.dist[1] = max(self.dist[1], max(dist, g_dist))
             self.vs[1] = max(self.vs[1], vs)
 
             dist = dist/self.dist[1]
-            spd = spd/self.spd[1]
+            g_dist = g_dist/self.dist[1]
             trk = trk/self.trk[1]
             alt = ((alt/ft)-CONSTRAINTS["alt"]["min"]) / \
                 (CONSTRAINTS["alt"]["max"]-CONSTRAINTS["alt"]["min"])
@@ -403,27 +387,23 @@ class ATC(core.Entity):
             if not vs == 0:
                 vs = vs/self.vs[1]
 
-            n_nodes, dist2next = get_n_nodes(
-                traf.id[i], self.traffic_manager, self.route_manager)
-
-            self.dist[1] = max(self.dist[1], dist2next)
-            dist2next = dist2next/self.dist[1]
+            route = route / len(self.route_manager.all_routes)
 
             if len(context) == 0:
                 context = np.array(
-                    [spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]]).reshape(1, 1, 9)
+                    [g_dist, alt, route, vs, trk, dist]).reshape(1, 1, 6)
             else:
                 context = np.append(context, np.array(
-                    [spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]]).reshape(1, 1, 9), axis=1)
+                    [g_dist, alt, route, vs, trk, dist]).reshape(1, 1, 6), axis=1)
 
         if len(context) == 0:
-            context = np.zeros(9).reshape(1, 1, 9)
+            context = np.zeros(6).reshape(1, 1, 6)
 
         return context
 
     # perform normalisation
     def normalise(self, state, what, _id, g_dist=None):
-
+        idx = traf.id2idx(_id)
         # Normalise the entire state
         if what == 'state':
             if not g_dist:
@@ -435,7 +415,7 @@ class ATC(core.Entity):
             self.vs[1] = max(self.vs[1], state[5])
 
             dist = g_dist/self.dist[1]
-            spd = state[4]/self.spd[1]
+
             trk = state[2]/self.trk[1]
             alt = ((state[3]/ft)-CONSTRAINTS["alt"]["min"]) / \
                 (CONSTRAINTS["alt"]["max"]-CONSTRAINTS["alt"]["min"])
@@ -444,13 +424,17 @@ class ATC(core.Entity):
             if not state[5] == 0:
                 vs = state[5]/self.vs[1]
 
-            n_nodes, dist2next = get_n_nodes(
-                _id, self.traffic_manager, self.route_manager)
+            dist_n = float(self.nearest_ac[idx][0])
 
-            self.dist[1] = max(self.dist[1], dist2next)
-            dist2next = dist2next/self.dist[1]
+            self.dist[1] = max(self.dist[1], dist_n)
+            dist_n = dist_n/self.dist[1]
 
-            return np.array([spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]])
+            route_idx = int(_id[3:])
+
+            route = self.traffic_manager.routes[route_idx] / \
+                len(self.route_manager.all_routes)
+
+            return np.array([dist, alt, route, vs, trk, dist_n])
 
     # Get the terminal aircraft
     def get_terminal(self, nearest_ac, g_dists):
@@ -469,7 +453,7 @@ class ATC(core.Entity):
 
                 # Get the terminal state
                 T = self.agent.terminal(
-                    i, n_ac_data, g_dists[i])
+                    i, n_ac_data, get_goal_dist(traf.id[i], self.traffic_manager, self.route_manager))
 
                 # Only care about terminal aircraft
                 if not T == 0:
@@ -481,8 +465,11 @@ class ATC(core.Entity):
                         terminal_ac[i] = 2
 
                     _id = traf.id[i]
-                    self.memory.store(
-                        _id, self.last_observation[_id], self.previous_action[_id], nearest_ac[i], T)
+                    try:
+                        self.memory.store(
+                            _id, self.last_observation[_id], self.previous_action[_id], nearest_ac[i], T)
+                    except Exception as e:
+                        print(f'ERROR: {e}')
 
         for i in range(len(terminal_ac)):
             if terminal_ac[i] > 0:

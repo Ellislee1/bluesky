@@ -66,21 +66,11 @@ def get_n_nodes(_id, traffic, routes, n=3):
 # Get the route length to the goal
 def get_goal_dist(_id, traffic, routes):
     idx = traf.id2idx(_id)
-    route = traffic.routes[_id]
+    route_idx = int(_id[3:])
+    route = traffic.routes[route_idx]
+    route = int(route)
 
-    wpt = get_next_node(_id, traffic, routes)
-
-    remaining_dist = 0
-
-    remaining_dist += get_dist([traf.lat[idx], traf.lon[idx]],
-                               routes.get_coords(route[wpt]))
-
-    for i in range(wpt, len(route)-1):
-        remaining_dist += get_dist(routes.get_coords(
-            route[wpt]), routes.get_coords(route[wpt+1]))
-        wpt += 1
-
-    return remaining_dist
+    return get_dist([traf.lat[idx], traf.lon[idx]], routes.all_routes[route]["points"][-1])
 
 
 def get_dist(pos1, pos2):
@@ -113,7 +103,7 @@ class Agent:
         if dist <= 3 and alt < 2000:
             return 1
 
-        if g_dist <= 12:
+        if g_dist <= 5:
             return 2
 
         return 0
@@ -121,7 +111,7 @@ class Agent:
     # Get the actions
     def act(self, state, context):
 
-        context = context.reshape((state.shape[0], -1, 9))
+        context = context.reshape((state.shape[0], -1, 6))
         policy, value = self.ppo.predictor.predict({'input_states': state, 'context_input': context, 'empty': np.zeros(
             (state.shape[0], self.hidden_size))}, batch_size=state.shape[0])
 

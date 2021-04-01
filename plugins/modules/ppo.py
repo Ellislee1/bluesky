@@ -18,7 +18,7 @@ class PPO():
             shape=(self.state_size,), name='input_states')
 
         _input_context = layers.Input(
-            shape=(None, 9), name='context_input')
+            shape=(None, 6), name='context_input')
         empty = layers.Input(shape=(self.hidden_size,), name='empty')
 
         advantage = layers.Input(shape=(1,), name='A')

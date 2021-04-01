@@ -22,21 +22,21 @@ class Traffic_Manager():
         self.active = 0
         self.total = 0
         self.update_timer = 0
-        self.routes = {}
+        self.routes = np.zeros(self.max_ac)
 
         self.first_run = True
 
         self.spawn_queue = random.choices(
-            self.times, k=len(self.network.departure))
+            self.times, k=len(self.network.all_routes))
 
         print("Traffic: READY")
 
     # Creates aircraft at each node for the start
     def first(self):
-        for i, origin in enumerate(self.network.departure):
+        for i in range(len(self.network.all_routes)):
             if self.total < self.max_ac:
-                path = self.network.generate_route(origin)
-                self.create_ac(path)
+                path = self.network.all_routes[i]
+                self.create_ac(path, i)
         self.first_run = False
 
     # Run on update, create new aircraft
@@ -49,14 +49,9 @@ class Traffic_Manager():
             # Run if the total number of aircraft for the epoch has npt been generated
             for k in range(len(self.spawn_queue)):
                 if self.update_timer == self.spawn_queue[k]:
-                    # Get the origin from the queue
-                    origin = [*self.network.departure.keys()][k]
-
-                    # Generate a path
-                    path = self.network.generate_route(origin)
-
+                    path = self.network.all_routes[k]
                     # Create the ac and reset the timer for this ac
-                    self.create_ac(path)
+                    self.create_ac(path, k)
                     self.spawn_queue[k] = self.update_timer + \
                         random.choices(self.times, k=1)[0]
 
@@ -67,27 +62,27 @@ class Traffic_Manager():
         self.update_timer += 1
 
     # Creating an aircraft in the system
-    def create_ac(self, path):
+    def create_ac(self, path, route_i):
         callsign = self.iata + str(self.total)
-        self.routes.update({callsign: path[:]})
+        self.routes[self.total] = route_i
+
+        ac_type = random.choice(self.types)
+
+        path = self.network.all_routes[route_i]["points"].copy()
 
         node = path.pop(0)
-        node_coord = self.network.get_coords(node)
-        ac_type = random.choice(self.types)
-        s_lat, s_lon = node_coord[0], node_coord[1]
-        hdg = self.network.get_heading(
-            node_coord, self.network.get_coords(path[0]))
+
+        hdg = self.network.all_routes[route_i]["heading"]
         alt = np.random.randint(self.min_alt, self.max_alt)
         spd = np.random.randint(self.min_spd, self.max_spd)
 
         stack("CRE {} {} {},{} {} {} {}".format(
-            callsign, ac_type, s_lat, s_lon, hdg, alt, spd))
+            callsign, ac_type, node[0], node[1], hdg, alt, spd))
 
         while path:
             node = path.pop(0)
-            node_coord = self.network.get_coords(node)
             stack("ADDWPT {} {},{}".format(
-                callsign, node_coord[0], node_coord[1]))
+                callsign, node[0], node[1]))
 
         self.active += 1
         self.total += 1
@@ -129,9 +124,9 @@ class Traffic_Manager():
         self.active = 0
         self.total = 0
         self.update_timer = 0
-        self.routes = {}
+        self.routes = np.zeros(self.max_ac)
 
         self.first_run = True
 
         self.spawn_queue = random.choices(
-            self.times, k=len(self.network.departure))
+            self.times, k=len(self.network.all_routes))

@@ -13,83 +13,20 @@ class Route_Manager():
 
         self.initilise(PATH)
 
-        if test_routes:
-            self.test_paths()
+        # if test_routes:
+        #     self.test_paths()
 
-        if draw_paths:
-            self.draw_routes()
+        # if draw_paths:
+        #     self.draw_routes()
 
         print("Airspace: READY")
 
     # Initilise the system
     def initilise(self, path):
         with open(path) as PATH:
-            all_nodes = json.load(PATH)["nodes"]
+            self.all_routes = json.load(PATH)["routes"]
 
-        # Load all departure, arrival and en route nodes fromt he JSON file
-        all_dep = all_nodes["dep"]
-        all_arr = all_nodes["arr"]
-        routes = all_nodes["routes"]
-
-        self.nodes = {}
-        self.departure = {}
-        self.arrival = {}
-
-        # Add nodes to the dictionaries
-        for dep in all_dep:
-            self.departure[dep["id"]] = dep
-
-        for arr in all_arr:
-            self.arrival[arr["id"]] = arr
-
-        for node in routes:
-            self.nodes[node["id"]] = node
-
-        # Create an indexed array of all nodes (Used for passing routes to the nn)
-        self.idx_array = np.concatenate(
-            (np.array(list(self.departure.keys())), np.array(list(self.arrival.keys())), np.array(
-                list(self.nodes.keys()))))
-
-        print(self.idx_array)
-
-    # visualise the routes
-    def draw_routes(self):
-        for x in self.departure:
-            ap = self.departure[x]
-            for connection in ap["connection"]:
-                node = self.nodes[connection]
-                stack(
-                    f'LINE {ap["id"]}{node["id"]} {ap["lat"]},{ap["lon"]} {node["lat"]},{node["lon"]}')
-
-        for x in self.nodes:
-            nd = self.nodes[x]
-            for connection in nd["connection"]:
-                try:
-                    node = self.nodes[connection]
-                    stack(
-                        f'LINE {nd["id"]}{node["id"]} {nd["lat"]},{nd["lon"]} {node["lat"]},{node["lon"]}')
-                except:
-                    print(f"No node: {connection}")
-
-        for x in self.arrival:
-            nd = self.arrival[x]
-            for connection in nd["connection"]:
-                try:
-                    node = self.nodes[connection]
-                    stack(
-                        f'LINE {nd["id"]}{node["id"]} {nd["lat"]},{nd["lon"]} {node["lat"]},{node["lon"]}')
-                except:
-                    print(f"No node: {connection}")
-
-    # Test that path are valid
-    def test_paths(self):
-        for origin in (self.departure):
-            for terminal in (self.arrival):
-                path = self.find_path(origin, terminal)
-                if len(path) <= 1:
-                    print(f'{origin}-{terminal}: NO Path')
-                else:
-                    print(f'{origin}-{terminal}: {path}')
+        print(self.all_routes)
 
     # Find a path between two points
     def find_path(self, origin, terminal):
@@ -140,6 +77,7 @@ class Route_Manager():
 
     # Generate a route
     def generate_route(self, dep):
+
         dist = 0
         while dist <= self.min_dist:
             arr = random.choice(list(self.arrival.values()))["id"]

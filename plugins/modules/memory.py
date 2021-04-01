@@ -13,8 +13,8 @@ class Memory():
 
         state, context = state
 
-        state = state.reshape((1, 9))
-        context = context.reshape((1, -1, 9))
+        state = state.reshape((1, 6))
+        context = context.reshape((1, -1, 6))
 
         self.max_agents = max(self.max_agents, context.shape[1])
 
