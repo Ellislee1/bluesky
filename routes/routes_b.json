@@ -1,0 +1,71 @@
+{
+    "nodes": {
+        "dep": [
+            {
+                "id": "L2",
+                "lat": 54.04,
+                "lon": -3.2,
+                "connection": [
+                    "LFTM"
+                ]
+            },
+            {
+                "id": "L3",
+                "lat": 53.696246,
+                "lon": -3,
+                "connection": [
+                    "LFTM"
+                ]
+            }
+        ],
+        "arr": [
+            {
+                "id": "R2",
+                "lat": 54.04,
+                "lon": -0.860716,
+                "connection": [
+                    "RGTM"
+                ]
+            },
+            {
+                "id": "R3",
+                "lat": 53.696246,
+                "lon": -1.060716,
+                "connection": [
+                    "RGTM"
+                ]
+            }
+        ],
+        "routes": [
+            {
+                "id": "INT",
+                "lat": 53.868123,
+                "lon": -2.030358,
+                "connection": [
+                    "LFTM",
+                    "RGTM"
+                ]
+            },
+            {
+                "id": "LFTM",
+                "lat": 53.868123,
+                "lon": -2.5,
+                "connection": [
+                    "INT",
+                    "L2",
+                    "L3"
+                ]
+            },
+            {
+                "id": "RGTM",
+                "lat": 53.868123,
+                "lon": -1.560716,
+                "connection": [
+                    "INT",
+                    "R2",
+                    "R3"
+                ]
+            }
+        ]
+    }
+}

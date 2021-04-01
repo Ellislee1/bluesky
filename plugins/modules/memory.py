@@ -1,62 +1,20 @@
 import numpy as np
 from tensorflow import keras
-from math import exp
+from bluesky import traf
 
 
-class Memory:
+class Memory():
     def __init__(self):
-        self.dist_goal = {}
-        self.dist_close = {}
-        self.previous_observation = {}
-        self.previous_action = {}
-        self.experience = {}
-        self.observation = {}
-
         self.max_agents = 0
-        self.max_dist = 1
+        self.experience = {}
 
-    def clear_memory(self):
-        self.dist_goal = {}
-        self.dist_close = {}
-        self.previous_observation = {}
-        self.previous_action = {}
-        # self.experience = {}
-        self.observation = {}
-
-    def store(self, state, action, next_state, traf, _id, nearest_ac, T=0):
-        reward = 0
-        done = False
-
-        idx = traf.id2idx(_id)
-
-        dist, alt = nearest_ac
-
-        dist = float(dist)
-        alt = float(alt)
-
-        if T == 0:
-
-            if ((dist <= 40 and dist > 5) and alt < 4000):
-                reward -= (0.3*(1-(dist/40)))*(0.5*exp(-2.5*(alt/3000)))
-
-            if not action == 0:
-                reward -= 0.1
-
-        if not T == 0:
-            done = True
-
-            if T == 1:
-                reward = -1000
-            else:
-                reward = 0
+    def store(self, _id, state, action, nearest_ac, T=0):
+        reward, done = self.get_reward(T, action, nearest_ac)
 
         state, context = state
 
         state = state.reshape((1, 9))
-        context = context.reshape((1, -1, 10))
-
-        # if context.shape[1] > 5:
-        #     context = context[:, -5:, :]
+        context = context.reshape((1, -1, 9))
 
         self.max_agents = max(self.max_agents, context.shape[1])
 
@@ -80,6 +38,7 @@ class Memory:
                 self.experience[_id]['reward'], reward)
             self.experience[_id]['done'] = np.append(
                 self.experience[_id]['done'], done)
+
         except:
             self.experience[_id]['state'] = state
             if self.max_agents > context.shape[1]:
@@ -92,4 +51,30 @@ class Memory:
             self.experience[_id]['reward'] = [reward]
             self.experience[_id]['done'] = [done]
 
-        return reward
+    def get_reward(self, T, action, nearest_ac):
+        end = True
+        if T == 1:
+            reward = - 5
+        elif T == 2:
+            reward = 5
+        else:
+            end = False
+            reward = 0
+
+            if float(nearest_ac[0]) < 40 and float(nearest_ac[1]) <= 2000:
+                dist = max(float(nearest_ac[0]), 10)
+                alt = float(nearest_ac[1])
+
+                dist_factor = -(1/dist)*10
+                alt_factor = (0.1**(alt/2000))
+                # alt_factor = 1
+
+                # print(dist_factor, alt_factor)
+                reward = dist_factor*alt_factor
+
+            if not (action == 1 or action == 3):
+                reward += -0.15
+                # reward += -0.75
+
+        # print(T, action, reward)
+        return reward, end

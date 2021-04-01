@@ -1,10 +1,8 @@
 """ BlueSky plugin template. The text you put here will be visible
     in BlueSky as the description of your plugin. """
-import datetime
 import time
 from random import randint
 
-# Import the global bluesky objects. Uncomment the ones you need
 import bluesky
 import numpy as np
 from bluesky import core, stack, traf  # , settings, navdb, sim, scr, tools
@@ -13,21 +11,49 @@ from bluesky.tools.aero import ft, kts
 from bluesky.tools.geo import latlondist, nm
 from tensorflow import keras
 
-from math import cos, sin
-
-from modules.agent import Agent, get_dist, get_goal_dist
-from modules.airspace import Airspace
+from modules.sectors import Sector_Manager
+from modules.routes import Route_Manager
+from modules.traffic import Traffic_Manager
+from modules.agent import Agent, get_goal_dist, get_dist, get_n_nodes
 from modules.memory import Memory
-from modules.sectors import load_sectors
-from modules.traffic import Traffic
 
+####################
+##  HYPER PARAMS  ##
+####################
+# Training
+TRAIN = True
+# Visual
+VISUALIZE = True
+# Files
+ROUTES = "routes/routes_b2.json"
+SECTORS = "sectors/sectors_b.2.json"
+FILE = "NULL"
+NEW_FILE = "case_a.3"
+# Other
+MAX_AC = 18
 EPOCHS = 5000
-MAX_AC = 15
+# [spd,alt,hdg,vs,acc,d_goal,wp_id1,wp_id2]
 STATE_SHAPE = 9
-ACTION_SHAPE = VALUE_SHAPE = 5
+# ACTION_SHAPE = 3
+# VALUE_SHAPE = 3
+ACTION_SHAPE = 4
+VALUE_SHAPE = 4
+TIME_SEP = [20, 25, 30]
+# ACTIONS = [0, 3000, -3000]
+# ACTIONS = [-3000, 0, 3000, 0]
+ACTIONS = [36000, 0, -28000, 0]
 
-FILE_NAMES = "case_b"
-CHECKPOINT_FILE = "training_b.ckpt"
+CONSTRAINTS = {
+    "alt": {
+        "min": 28000,
+        "max": 36000
+    },
+    "cas": {
+        "min": 250,
+        "max": 350
+    }
+}
+####################
 
 
 # Initialization function of your plugin. Do not change the name of this
@@ -37,7 +63,7 @@ CHECKPOINT_FILE = "training_b.ckpt"
 def init_plugin():
     ''' Plugin initialisation function. '''
     # Instantiate our example entity
-    example = ATC()
+    atc = ATC()
 
     # Configuration parameters
     config = {
@@ -63,420 +89,475 @@ class ATC(core.Entity):
 
     def __init__(self):
         super().__init__()
+        self.super_start = time.perf_counter()
+
         self.initilized = False
 
-        self.max_alt = 36000
-        self.min_alt = 28000
-
-        self.max_tas = -1
-        self.min_tas = 0
-
-        self.max_d = 0
-
-    # Functions that need to be called periodically can be indicated to BlueSky
-    # with the timed_function decorator
-
-    def init(self):
-        # Load the sector bounds
-        self.sectors = sectors = load_sectors(
-            sector_path="sectors/case_b.2.json")
-
-        self.airspace = Airspace(path="nodes/case_b.json")
-        self.traffic = Traffic(max_ac=MAX_AC, network=self.airspace)
-        self.memory = Memory()
-        self.agent = Agent(STATE_SHAPE, ACTION_SHAPE,
-                           VALUE_SHAPE, checkpoint=CHECKPOINT_FILE)
-
-        try:
-            self.agent.load(path=FILE_NAMES+"_best")
-        except:
-            try:
-                self.agent.load(path=FILE_NAMES)
-            except:
-                pass
-
         self.epoch_counter = 0
-        self.success = 0
-        self.fail = 0
+        # [Success, Fail]
+        self.results = np.zeros(2)
 
         self.all_success = []
         self.all_fail = []
         self.mean_success = 0
         self.all_mean_success, self.best = 0, 0
         self.mean_rewards = []
+        self.epoch_actions = np.zeros(ACTION_SHAPE)
 
         self.start = None
         self.stop = None
 
-        # Actions of Hold current, descend, climb, retard, accelarate
-        self.constraints = {
-            "alt": {
-                "min": 30000,
-                "max": 36000
-            },
-            "spd": {
-                "min": 270,
-                "max": 320
-            }
-        }
+        self.dist = [0, -1]
+        self.spd = [0, -1]
+        self.trk = [0, 360]
+        self.vs = [0, -1]
 
-        self.actions = np.array(
-            [0, self.constraints["alt"]["min"], self.constraints["alt"]["max"], self.constraints["spd"]["min"], self.constraints["spd"]["max"]])
+        self.last_observation = {}
+        self.last_reward_observation = {}
+        self.previous_action = {}
+        self.observation = {}
+
+    def on_load(self):
+        self.sector_manager = Sector_Manager(SECTORS)
+        self.route_manager = Route_Manager(
+            ROUTES, test_routes=VISUALIZE, draw_paths=VISUALIZE)
+        self.traffic_manager = Traffic_Manager(
+            max_ac=MAX_AC, times=TIME_SEP, max_spd=CONSTRAINTS[
+                "cas"]["max"], min_spd=CONSTRAINTS["cas"]["min"],
+            max_alt=32000, min_alt=32000, network=self.route_manager)
+
+        self.memory = Memory()
+
+        self.agent = Agent(state_size=STATE_SHAPE,
+                           action_size=ACTION_SHAPE, value_size=VALUE_SHAPE)
+
+        try:
+            self.agent.load(path=FILE+"best.h5")
+        except:
+            try:
+                self.agent.load(path=FILE+".h5")
+            except:
+                pass
+
+        self.initilized = True
 
         print("ATC: READY")
         string = "=================================\n   UPDATE: RUNNING EPOCH {}\n=================================\n".format(
             self.format_epoch())
         self.print_all(string)
 
-        self.initilized = True
+    # Functions that need to be called periodically can be indicated to BlueSky
+    # with the timed_function decorator
 
-    @core.timed_function(name='atc', dt=12)
+    @core.timed_function(name='example', dt=12)
     def update(self):
-        # Initilize env if not already
+        # Initilize system
         if not self.initilized:
-            self.init()
+            self.on_load()
 
-        # Start the epoch timer
+        # Start epoch timer
         if not self.start:
             self.start = time.perf_counter()
 
-        # Run the spawn command, this creates aircraft in the scenario.
-        self.traffic.spawn()
-
-        # Update the sectors each aircraft belongs to
-        self.traffic.get_sectors(self.sectors, traf)
-
-        terminal_ac = np.zeros(len(traf.id), dtype=int)
-        terminal_id = []
-
-        active_sectors = self.traffic.get_active(traf)
+        # Create aircraft
+        self.traffic_manager.spawn()
+        # Update Aircraft active sectors
+        self.traffic_manager.update_active(self.sector_manager.system_sectors)
 
         # Generate a full distancematrix between each aircraft
         full_dist_matrix = self.get_dist_martix()
 
-        # Loop through and get terminal aircraft
-        for i in range(len(traf.id)):
-            T = 0
-            n_id = None
-            for x in range(len(self.traffic.traf_in_sectors)):
-                valid = self.traffic.traf_in_sectors[x, i]
-                # Run if AC is in zone, this prevents collisions in uncontrolled zones
-                if valid:
+        # Get nearest ac in a matrix
+        nearest_ac = self.get_nearest_ac(dist_matrix=full_dist_matrix)
 
-                    close, alt, n_id = self.get_nearest_ac(
-                        i, full_dist_matrix, active_sectors)
-                    T = self.agent.terminal(
-                        traf, i, (close, alt), self.traffic, self.memory)
-                    break
-                # When AC is not in a zone
-                else:
-                    T = self.agent.terminal(
-                        traf, i, None, self.traffic, self.memory)
+        # Get goal distances for each aircraft
+        g_distance = self.get_goal_distances()
 
-            # Add T type to terminals
-            if not T == 0:
-                if not terminal_ac[i] == True:
-                    terminal_ac[i] = True
-                    terminal_id.append([traf.id[i], T])
+        # Get an array of terminal aircraft
+        terminal_ac, terminal_id = self.get_terminal(nearest_ac, g_distance)
 
-                if T == 1 and n_id:
-                    idx = traf.id2idx(n_id)
-                    if not terminal_ac[idx] == True:
-                        terminal_ac[idx] = True
-                        terminal_id.append([n_id, 1])
+        self.handle_terminal(terminal_id)
 
-            call_sig = traf.id[i]
-            try:
-                idx = traf.id2idx(call_sig)
-
-                if len(active_sectors[idx]) > 0:
-                    close, alt, _ = self.get_nearest_ac(
-                        i, full_dist_matrix, active_sectors)
-                    self.mean_rewards.append(self.memory.store(self.memory.previous_observation[call_sig], self.memory.previous_action[call_sig], [np.zeros(
-                        self.memory.previous_observation[call_sig][0].shape), (self.memory.previous_observation[call_sig][1].shape)], traf, call_sig, (close, alt), T))
-            except Exception as e:
-                if call_sig in self.memory.previous_action.keys():
-                    print(f'ERROR: ', e)
-
-        # Remove all treminal aircraft
-        self.handle_terminals(terminal_id)
-
-        # See if all aircraft for an epoch have been created, i.e. epoch is finished
-        if self.traffic.check_done():
-            # Reset the environment
+        if self.traffic_manager.check_done():
             self.epoch_reset()
             return
 
+        if not TRAIN and (self.traffic_manager.total % 50 == 0):
+            string = "Success: {} | Fail: {} | Mean Success: {:.3f}%".format(
+                int(self.results[0]), int(self.results[1]), (self.results[0]/MAX_AC)*100)
+            self.print_all(string)
+
+        if len(traf.id) <= 0:
+            return
+
         if not len(traf.id) == 0:
-            next_action = {}
+            policy, normal_state, normal_context = self.get_actions(
+                terminal_ac, g_distance, full_dist_matrix)
 
-            # lat,lon,alt,tas,trk,vs,ax
-            state = np.zeros((len(traf.id), 9))
+            if len(policy) > 0:
+                idx = 0
+                new_actions = {}
+                for i in range(len(traf.id)):
+                    if terminal_ac[i] == 0 and len(self.traffic_manager.active_sectors[i]) > 0:
+                        if not np.any(np.isnan(policy[idx])):
+                            _id = traf.id[i]
 
-            non_T_ids = np.array(traf.id)[terminal_ac != 1]
+                            if not _id in self.last_observation.keys():
+                                self.last_observation[_id] = [
+                                    normal_state[idx], normal_context[idx]]
 
-            indexes = np.array([int(x[3:]) for x in traf.id])
+                            action = np.random.choice(
+                                ACTION_SHAPE, 1, p=policy[idx].flatten())[0]
 
-            state[:, 0] = traf.lat
-            state[:, 1] = traf.lon
-            state[:, 2] = traf.alt
-            state[:, 3] = traf.tas
-            state[:, 4] = traf.trk
-            state[:, 5] = traf.vs
-            state[:, 6] = traf.ax
-            state[:, 7] = traf.actwp.lat
-            state[:, 8] = traf.actwp.lon
+                            # print(policy[idx], action)
 
-            normal_state, context = self.get_normals_states(
-                state, state[0].shape[0], terminal_ac, full_dist_matrix, active_sectors)
+                            self.epoch_actions[action] += 1
 
-            # If there is no context dont do anything
-            if len(context) == 0:
-                return
+                            if not _id in self.observation.keys() and _id in self.previous_action.keys():
+                                self.observation[_id] = [
+                                    normal_state[idx], normal_context[idx]]
 
-            # get the policy and values
-            policy, _ = self.agent.act(normal_state, context)
+                                self.memory.store(
+                                    _id, self.last_observation[_id], self.previous_action[_id], nearest_ac[idx])
 
-            j = 0
-            for x in range(len(non_T_ids)):
-                _id = non_T_ids[x]
-                idx = traf.id2idx(_id)
+                                self.last_observation[_id] = self.observation[_id]
 
-                if len(active_sectors[idx]) == 0:
-                    continue
+                                del self.observation[_id]
 
-                close, alt, _ = self.get_nearest_ac(
-                    j, full_dist_matrix, active_sectors)
+                            self.perform_action(i, action)
 
-                nearest_ac = (close, alt)
+                            new_actions[_id] = action
 
-                if not _id in self.memory.previous_observation.keys():
-                    self.memory.previous_observation[_id] = [
-                        normal_state[j], context[j]]
+                        self.previous_action = new_actions
 
-                if not _id in self.memory.observation.keys() and _id in self.memory.previous_action.keys():
-                    self.memory.observation[_id] = [
-                        normal_state[j], context[j]]
+                        idx += 1
 
-                    self.mean_rewards.append(self.memory.store(
-                        self.memory.previous_observation[_id], self.memory.previous_action[_id], self.memory.observation[_id], traf, _id, nearest_ac, T))
+    # Act
+    def get_actions(self, terminal_ac, g_dists, dist_matrix):
+        ids = []
+        new_actions = {}
 
-                    self.memory.previous_observation[_id] = self.memory.observation[_id]
+        state = self.get_state()
 
-                    del self.memory.observation[_id]
+        normal_state, normal_context = self.normalise_all(
+            state, terminal_ac, g_dists, dist_matrix)
 
-                action = np.random.choice(
-                    5, 1, p=policy[j].flatten())[0]
+        policy = []
+        if not len(normal_state) == 0:
+            policy = self.agent.act(normal_state, normal_context)
 
-                self.act(action, _id)
+        return policy, normal_state, normal_context
 
-                next_action[_id] = action
+    # For an aircraft perform an action
+    def perform_action(self, i, action):
+        if action < 3:
+            traf_alt = int(traf.alt[i]/ft)
+            new_alt = int(round((traf_alt+ACTIONS[action])))
 
-                j += 1
+            alt = max(CONSTRAINTS["alt"]["min"], min(
+                CONSTRAINTS["alt"]["max"], new_alt))
 
-            self.memory.previous_action = next_action
+            # print(traf_alt, alt)
 
-    def get_nearest_ac(self, _id, dist_matrix, sectors):
-        row = dist_matrix[:, _id]
-        close = 10e+25
-        alt_sep = 0
+            stack.stack("{} alt {}".format(traf.id[i], alt))
+        elif action == 4:
+            traf_alt = traf.alt[i]/ft
+            new_alt = int(round((traf_alt)))
 
-        nearest_id = None
+    # Get the current state
 
-        for i, dist in enumerate(row):
-            if i == _id or len(sectors[i]) == 0:
+    def get_state(self):
+        state = np.zeros((len(traf.id), 6))
+
+        start_ids, end_ids = self.get_all_nodes()
+
+        state[:, 0] = traf.lat
+        state[:, 1] = traf.lon
+        state[:, 2] = traf.trk
+        state[:, 3] = traf.alt
+        state[:, 4] = traf.tas
+        state[:, 5] = traf.vs
+
+        return state
+
+    # Get all nodes for each aircraft
+    def get_all_nodes(self):
+        start_ids = np.zeros(len(traf.id), dtype=int)
+        end_ids = np.zeros(len(traf.id), dtype=int)
+
+        for i in range(len(traf.id)):
+            _id = traf.id[i]
+            route = self.traffic_manager.routes[_id]
+            start_ids[i] = np.argwhere(self.route_manager.idx_array ==
+                                       route[0])
+            end_ids[i] = np.argwhere(self.route_manager.idx_array ==
+                                     route[-1])
+
+        return start_ids, end_ids
+
+    # Normalise the state and context
+    def normalise_all(self, state, terminal_ac, g_dists, dist_matrix):
+        normal_states = self.normalise_state(state, terminal_ac, g_dists)
+
+        normal_context = []
+
+        start_ids, end_ids = self.get_all_nodes()
+
+        max_agents = 0
+        for _id in traf.id:
+            if terminal_ac[traf.id2idx(_id)] > 0 or len(self.traffic_manager.active_sectors[traf.id2idx(_id)]) <= 0:
                 continue
 
-            if dist < close:
-                close = dist
-                this_alt = traf.alt[_id]
-                close_alt = traf.alt[i]
-                alt_sep = abs(this_alt - close_alt)
+            new_context = self.normalise_context(
+                _id, terminal_ac, dist_matrix, start_ids, end_ids)
 
-                nearest_id = traf.id[i]
+            max_agents = max(max_agents, len(new_context))
 
-        return close, alt_sep/ft, nearest_id
+            if len(normal_context) == 0:
+                normal_context = new_context
+            else:
+                normal_context = np.append(
+                    keras.preprocessing.sequence.pad_sequences(normal_context, max_agents, dtype='float32'), keras.preprocessing.sequence.pad_sequences(new_context, max_agents, dtype='float32'), axis=0)
 
-    def act(self, action, _id):
+        if len(normal_context) == 0:
+            normal_context = np.array([0, 0, 0, 0, 0, 0, 0]).reshape(1, 1, 7)
+
+        # print(normal_states.shape, normal_context.shape)
+        return normal_states, normal_context
+
+    # Normalise the agent state only
+    def normalise_state(self, state, terminal_ac, g_dists):
+        total_active = 0
+
+        for i in range(len(terminal_ac)):
+            if terminal_ac[i] == 0 and len(self.traffic_manager.active_sectors[i]) > 0:
+                total_active += 1
+
+        normalised_state = np.zeros((total_active, STATE_SHAPE))
+
+        count = 0
+        for i in range(len(traf.id)):
+            if terminal_ac[i] > 0 or len(self.traffic_manager.active_sectors[i]) <= 0:
+                continue
+
+            normalised_state[count, :] = self.normalise(
+                state[i], 'state', traf.id[i], g_dist=g_dists[i])
+
+            count += 1
+
+        return normalised_state
+
+    # Get and normalise context
+    def normalise_context(self, _id, terminal_ac, dist_matrix, start_ids, end_ids):
+        context = []
         idx = traf.id2idx(_id)
 
-        if action == 1 or action == 2:
-            stack.stack("ALT {} {}".format(_id, self.actions[action]))
-        elif action == 3 or action == 4:
-            stack.stack("SPD {} {}".format(_id, self.actions[action]))
+        distances = dist_matrix[:, idx]
+        this_sectors = self.traffic_manager.active_sectors[idx]
 
+        this_lat, this_lon = traf.lat[idx], traf.lon[idx]
+
+        for i in range(len(distances)):
+            # Ignore current aircraft
+            if i == idx:
+                continue
+
+            if terminal_ac[i] > 0 or len(self.traffic_manager.active_sectors[i]) <= 0:
+                continue
+
+            sectors = self.traffic_manager.active_sectors[i]
+
+            # Only care if the ac in a matching sector
+            flag = False
+            for x in sectors:
+                if x in this_sectors:
+                    flag = True
+
+            if not flag:
+                continue
+
+            dist = get_dist([this_lat, this_lon], [traf.lat[i], traf.lon[i]])
+
+            # Only care about visible distance aircraft
+            if dist > 40:
+                continue
+
+            spd = traf.tas[i]
+            alt = traf.alt[i]
+            trk = traf.trk[i]
+            vs = traf.vs[i]
+            start_id = start_ids[i]
+            end_id = end_ids[i]
+
+            self.dist[1] = max(self.dist[1], dist)
+            self.spd[1] = max(self.spd[1], spd)
+            self.vs[1] = max(self.vs[1], vs)
+
+            dist = dist/self.dist[1]
+            spd = spd/self.spd[1]
+            trk = trk/self.trk[1]
+            alt = ((alt/ft)-CONSTRAINTS["alt"]["min"]) / \
+                (CONSTRAINTS["alt"]["max"]-CONSTRAINTS["alt"]["min"])
+
+            vs = 0
+            if not vs == 0:
+                vs = vs/self.vs[1]
+
+            n_nodes, dist2next = get_n_nodes(
+                traf.id[i], self.traffic_manager, self.route_manager)
+
+            self.dist[1] = max(self.dist[1], dist2next)
+            dist2next = dist2next/self.dist[1]
+
+            if len(context) == 0:
+                context = np.array(
+                    [spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]]).reshape(1, 1, 9)
+            else:
+                context = np.append(context, np.array(
+                    [spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]]).reshape(1, 1, 9), axis=1)
+
+        if len(context) == 0:
+            context = np.zeros(9).reshape(1, 1, 9)
+
+        return context
+
+    # perform normalisation
+    def normalise(self, state, what, _id, g_dist=None):
+
+        # Normalise the entire state
+        if what == 'state':
+            if not g_dist:
+                raise Exception(
+                    "For normalising a state please pass the distance to the goal.")
+
+            self.dist[1] = max(self.dist[1], g_dist)
+            self.spd[1] = max(self.spd[1], state[4])
+            self.vs[1] = max(self.vs[1], state[5])
+
+            dist = g_dist/self.dist[1]
+            spd = state[4]/self.spd[1]
+            trk = state[2]/self.trk[1]
+            alt = ((state[3]/ft)-CONSTRAINTS["alt"]["min"]) / \
+                (CONSTRAINTS["alt"]["max"]-CONSTRAINTS["alt"]["min"])
+
+            vs = 0
+            if not state[5] == 0:
+                vs = state[5]/self.vs[1]
+
+            n_nodes, dist2next = get_n_nodes(
+                _id, self.traffic_manager, self.route_manager)
+
+            self.dist[1] = max(self.dist[1], dist2next)
+            dist2next = dist2next/self.dist[1]
+
+            return np.array([spd, alt, trk, vs, dist, dist2next, n_nodes[0], n_nodes[1], n_nodes[2]])
+
+    # Get the terminal aircraft
+    def get_terminal(self, nearest_ac, g_dists):
+        terminal_ac = np.zeros(len(traf.id), dtype=int)
+        terminal_id = []
+
+        # Loop through all aircraft
+        for i in range(len(traf.id)):
+            # Terminal state 0 = not terminal, 1 = collision, 2 = success
+            T = 0
+
+            # Only care about aircraft in a sector
+            if len(self.traffic_manager.active_sectors[i]) > 0:
+                close_ac = nearest_ac[i]
+                n_ac_data = (close_ac[0], close_ac[1])
+
+                # Get the terminal state
+                T = self.agent.terminal(
+                    i, n_ac_data, g_dists[i])
+
+                # Only care about terminal aircraft
+                if not T == 0:
+                    # Update collision aircraft
+                    if T == 1:
+                        terminal_ac[i] = 1
+                        terminal_ac[traf.id2idx(close_ac[2])] = 1
+                    elif not terminal_ac[i] == 1:
+                        terminal_ac[i] = 2
+
+                    _id = traf.id[i]
+                    self.memory.store(
+                        _id, self.last_observation[_id], self.previous_action[_id], nearest_ac[i], T)
+
+        for i in range(len(terminal_ac)):
+            if terminal_ac[i] > 0:
+                terminal_id.append([traf.id[i], terminal_ac[i]])
+
+        return terminal_ac, terminal_id
+
+    # Handle terminal aircraft
+    def handle_terminal(self, terminal_id):
+        for ac in terminal_id:
+            stack.stack('DEL {}'.format(ac[0]))
+
+            self.traffic_manager.active -= 1
+
+            if ac[1] == 1:
+                self.results[1] += 1
+            elif ac[1] == 2:
+                self.results[0] += 1
+
+    # Generates a distance matrix of all aircraft in the system
     def get_dist_martix(self):
         size = traf.lat.shape[0]
         return geo.latlondist_matrix(np.repeat(traf.lat, size), np.repeat(
             traf.lon, size), np.tile(traf.lat, size), np.tile(traf.lon, size)).reshape(size, size)
 
-    def handle_terminals(self, terminals):
-        for _id, T in terminals:
-            stack.stack("DEL {}".format(_id))
-            self.traffic.active -= 1
+    # Get the nearest aircraft to agents
+    def get_nearest_ac(self, dist_matrix):
+        nearest = []
 
-            if T == 1:
-                self.fail += 1
-            else:
-                self.success += 1
+        # Loop through all aircraft
+        for i in range(len(traf.id)):
+            a_alt = traf.alt[i]/ft
 
-    def get_normals_states(self, state, no_states, terminal, distancematrix, sectors):
-        number_of_aircraft = traf.lat.shape[0]
+            ac_dists = dist_matrix[:, i]
 
-        max_agents = 1
+            close = 10e+25
+            alt_sep = 10e+25
 
-        total_active = 0
+            nearest_id = None
 
-        for i in range(len(terminal)):
-            if terminal[i] == 0 and len(sectors[i]) > 0:
-                total_active += 1
+            # Loop through the row on the dist matrix
+            for x in range(len(ac_dists)):
+                # Ensure the aircraft is in controlled airspace and not the current aircraft
+                if not x == i and len(self.traffic_manager.active_sectors[x]) > 0:
 
-        normal_state = np.zeros((total_active, 9))
+                    # See if it is closest and update
+                    if ac_dists[x] < close:
+                        close = float(ac_dists[x])
+                        i_alt = traf.alt[x]/ft
 
-        size = traf.lat.shape[0]
-        # index = np.arange(size).reshape(-1, 1)
+                        alt_sep = abs(a_alt-i_alt)
 
-        sort = np.array(np.argsort(distancematrix, axis=1))
+                        nearest_id = traf.id[x]
+            nearest.append([close, alt_sep, nearest_id])
 
-        total_closest_states = []
+        return np.array(nearest)
 
-        count = 0
+    # returns a matrix of distances to a goal
+    def get_goal_distances(self):
+        goal_ds = np.zeros(len(traf.id), dtype=float)
 
-        for i in range(distancematrix.shape[0]):
-            # We dont care about aircraft that are terminal (new actions dont hold gravity)
-            # We also dont care about traffic that is not in a sector, as we assume that no collisions can occure outside of controlled space.
-            this_sectors = sectors[i]
-            pos = [traf.lat[i], traf.lon[i]]
-            if terminal[i] == 1 or len(this_sectors) <= 0:
-                continue
+        for i in range(len(traf.id)):
+            goal_ds[i] = get_goal_dist(
+                traf.id[i], self.traffic_manager, self.route_manager)
 
-            normal_state[count, :] = self.normalise_state(
-                state[i], _id=traf.id[i])
-
-            count += 1
-
-            closest_states = []
-            intruder_count = 0
-
-            for j in range(len(sort[i])):
-                index = int(sort[i, j])
-
-                # Ignore the agent
-                if i == index:
-                    continue
-
-                # Ignore terminal aircraft or aircraft not in a sector
-                if terminal[index] == 1 or len(sectors[index]) <= 0:
-                    continue
-
-                # Find out if the aircraft shares a sector with the agent (this includes overlaps)
-                flag = False
-                for sector in sectors[j]:
-                    flag = (sector in this_sectors)
-
-                    if flag:
-                        break
-
-                # Ignore aircraft not sharing a sector (this includes overlaps)
-                if not flag:
-                    continue
-
-                max_agents = max(max_agents, j)
-
-                if len(closest_states) == 0:
-                    closest_states = np.array(
-                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index], traf.actwp.lat[index], traf.actwp.lon[index]])
-
-                    closest_states = self.normalise_context(
-                        closest_states, pos, _id=traf.id[index])
-                else:
-                    adding = np.array(
-                        [traf.lat[index], traf.lon[index], traf.alt[index], traf.tas[index], traf.trk[index], traf.vs[index], traf.ax[index], traf.actwp.lat[index], traf.actwp.lon[index]])
-
-                    adding = self.normalise_context(
-                        adding, pos, _id=traf.id[index])
-
-                    closest_states = np.append(closest_states, adding, axis=1)
-
-                intruder_count += 1
-
-            if len(closest_states) == 0:
-                closest_states = np.zeros(10).reshape(1, 1, 10)
-
-            if len(total_closest_states) == 0:
-                total_closest_states = closest_states
-            else:
-                total_closest_states = np.append(keras.preprocessing.sequence.pad_sequences(
-                    total_closest_states, max_agents, dtype='float32'), keras.preprocessing.sequence.pad_sequences(closest_states, max_agents, dtype='float32'), axis=0)
-
-        return normal_state, total_closest_states
-
-    def normalise_state(self, state, _id):
-        dist = get_goal_dist(_id, traf, self.traffic)
-        self.max_d = max(self.max_d, dist)
-        goal_d = dist/self.max_d
-
-        alt = self.normalise_alt(state[2])
-        tas = self.normalise_tas(state[3])
-        trk = self.normalise_trk(state[4])
-        vs = state[5]
-        ax = state[6]
-        x, y, z = self.normalise_nextwpt((state[7], state[8]))
-
-        return np.array([goal_d, alt, tas, trk, vs, ax, x, y, z])
-
-    def normalise_context(self, state, agent_pos, _id):
-        dist = get_goal_dist(_id, traf, self.traffic)
-        self.max_d = max(self.max_d, dist)
-
-        goal_d = dist/self.max_d
-        alt = self.normalise_alt(state[2])
-        tas = self.normalise_tas(state[3])
-        trk = self.normalise_trk(state[4])
-        vs = state[5]
-        ax = state[6]
-        x, y, z = self.normalise_nextwpt((state[7], state[8]))
-
-        sep = get_dist(agent_pos, [state[0], state[1]])
-        self.max_d = max(sep, self.max_d)
-        sep = sep/self.max_d
-
-        context_array = np.array([goal_d, alt, tas, trk, vs, ax, sep, x, y, z])
-
-        return context_array.reshape((1, 1, 10))
-
-    def normalise_nextwpt(self, next_wpt):
-        lat, lon = next_wpt
-
-        x = cos(lat)*cos(lon)
-        y = cos(lat)*sin(lon)
-        z = sin(lat)
-
-        x = (x+1)/2
-        y = (y+1)/2
-        z = (z+1)/2
-
-        return x, y, z
-
-    def normalise_alt(self, alt):
-        return (alt-self.min_alt)/(self.max_alt-self.min_alt)
-
-    def normalise_tas(self, tas):
-        self.max_tas = max(self.max_tas, tas)
-
-        return (tas-self.min_tas)/(self.max_tas-self.min_tas)
-
-    def normalise_trk(self, trk):
-        return (trk)/(360)
+        return goal_ds
 
     # Reset the environment for the next epoch
     def epoch_reset(self):
         # Reset the traffic creation
-        self.traffic.reset()
+        self.traffic_manager.reset()
 
         # Keep track of all success and failures
-        self.all_success.append(self.success)
-        self.all_fail.append(self.fail)
+        self.all_success.append(self.results[0])
+        self.all_fail.append(self.results[1])
 
         # Calcuate total mean success
         self.all_mean_success = np.mean(self.all_success)
@@ -485,41 +566,43 @@ class ATC(core.Entity):
         if (self.epoch_counter+1) >= 50:
             self.mean_success = np.mean(self.all_success[-50:])
 
-        # Train the model every 5 epochs
         if (self.epoch_counter+1) % 5 == 0:
-            if self.mean_success >= self.best:
-                print('----- Saving New Best Model -----')
-                self.agent.save(path=FILE_NAMES+"_best")
+            if self.mean_success > self.best:
+                if TRAIN:
+                    print('::::::: Saving Best ::::::')
+                    self.agent.save(path=NEW_FILE+"best.h5")
+                self.best = self.mean_success
+            if TRAIN:
+                print(':::::: Saving Model ::::::')
+                self.agent.save(path=NEW_FILE+".h5")
+                print(":::::::: Training ::::::::")
+                self.agent.train(self.memory)
+                print(":::::::: Complete ::::::::")
 
-            print('----- Saving Model -----')
-            self.agent.save(path=FILE_NAMES)
-
-            print('----- Training Model -----')
-            self.agent.train(self.memory)
-            self.memory.max_agents = 0
-            self.memory.experience = {}
-
-        self.memory.previous_action = {}
-        self.observation = {}
-        self.previous_observation = {}
-
-        # Get the best rolling mean
-        self.best = max(self.mean_success, self.best)
-
-        np.save('goals_1_a.npy', np.array(self.all_success))
-        np.save('collision_1_a.npy', np.array(self.all_fail))
+        temp = np.array([np.array(self.all_success), np.array(self.all_fail)])
+        np.savetxt("Files/"+NEW_FILE+"_numpy.csv", temp, delimiter=',')
 
         # Stop the timer
         self.stop = time.perf_counter()
         # -------- Printing Outputs --------
         string = "Epoch run in {:.2f} seconds".format(self.stop-self.start)
         self.print_all(string)
-        string = "Success: {} | Fail: {} | Mean Success: {:.5f} | Mean Reward {:.5f} | (50) Mean Success Rolling {:.5f} | Best {:.5f}".format(
-            self.success, self.fail, self.all_mean_success/MAX_AC, np.mean(self.mean_rewards), self.mean_success/MAX_AC, self.best/MAX_AC)
+        string = "Success: {} | Fail: {} | Mean Success: {:.3f}% | (50) Mean Success Rolling {:.3f}% | Best {:.3f}%".format(
+            int(self.results[0]), int(self.results[1]), (self.all_mean_success/MAX_AC)*100, (self.mean_success/MAX_AC)*100, (self.best/MAX_AC)*100)
+        self.print_all(string)
+        string = "Actions -> Descend: {}, Hold Current: {}, Climb: {}, Maintain Climb: {}".format(
+            self.epoch_actions[0], self.epoch_actions[1], self.epoch_actions[2], self.epoch_actions[3])
+        # string = "Actions -> Descend: {}, Climb: {}".format(
+        #     self.epoch_actions[1], self.epoch_actions[0])
         self.print_all(string)
 
         if self.epoch_counter+1 >= EPOCHS:
+            super_stop = time.perf_counter()
             stack.stack("STOP")
+            string = "::END:: Training {} episodes took {:.2f} hours".format(
+                EPOCHS, ((super_stop-self.super_start)/60)/60)
+            self.print_all(string)
+            return
 
         self.epoch_counter += 1
         string = "=================================\n   UPDATE: RUNNING EPOCH {}\n=================================\n".format(
@@ -527,11 +610,16 @@ class ATC(core.Entity):
         self.print_all(string)
 
         # Reset values
-        self.success = 0
-        self.fail = 0
+        self.results = np.zeros(2)
         self.stop = None
         self.start = None
         self.mean_rewards = []
+        self.epoch_actions = []
+        self.epoch_actions = np.zeros(ACTION_SHAPE)
+
+        self.previous_action = {}
+        self.last_observation = {}
+        self.observation = {}
 
     # Scripts for printing values
     def print_all(self, string):

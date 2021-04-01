@@ -5,6 +5,23 @@ from bluesky.stack import stack
 from bluesky.tools import areafilter
 
 
+class Sector_Manager():
+    def __init__(self, PATH):
+        self.load_sectors(PATH)
+
+    def load_sectors(self, path):
+        print("Initilizing Sectors")
+        with open(path) as PATH:
+            sectors = json.load(PATH)["sectors"]
+
+        self.system_sectors = {}
+        for sector in sectors:
+            self.system_sectors[sector["name"]] = Sector(sector)
+
+        for sector in self.system_sectors:
+            self.system_sectors[sector].initilise()
+
+
 class Sector():
     def __init__(self, sector):
         self.name = sector["name"]
@@ -26,21 +43,3 @@ class Sector():
         # areafilter.defineArea(areaname=self.name,
         #                       areatype='POLY', coordinates=np.array(coords))
         stack(string)
-
-
-def load_sectors(sector_path="sectors/sectors.json"):
-    print("here")
-    print("Initilizing Sectors")
-    with open(sector_path) as PATH:
-        sectors = json.load(PATH)["sectors"]
-
-    system_sectors = {}
-    for sector in sectors:
-        system_sectors[sector["name"]] = Sector(sector)
-
-    for sector in system_sectors:
-        system_sectors[sector].initilise()
-
-        print(sector+"=", areafilter.hasArea(str(sector)))
-
-    return system_sectors

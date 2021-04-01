@@ -20,12 +20,11 @@ def defineArea(areaname, areatype, coordinates, top=1e9, bottom=-1e9):
         else:
             return True, 'Currently defined shapes:\n' + \
                 ', '.join(areas)
-    try:
-        if not coordinates:
-            if_not(areas)
-    except:
-        if len(coordinates) == 0:
-            if_not(areas)
+    if not coordinates:
+        if areaname in areas:
+            return True, str(areas[areaname])
+        else:
+            return False, f'Unknown shape: {areaname}'
     if areatype == 'BOX':
         areas[areaname] = Box(areaname, coordinates, top, bottom)
     elif areatype == 'CIRCLE':
@@ -38,14 +37,6 @@ def defineArea(areaname, areatype, coordinates, top=1e9, bottom=-1e9):
     # Pass the shape on to the screen object
     bs.scr.objappend(areatype, areaname, coordinates)
 
-
-def if_not(areas):
-    if areaname in areas:
-        return True, str(areas[areaname])
-    else:
-        return False, f'Unknown shape: {areaname}'
-
-
 def checkInside(areaname, lat, lon, alt):
     """ Check if points with coordinates lat, lon, alt are inside area with name 'areaname'.
         Returns an array of booleans. True ==  Inside"""
@@ -54,18 +45,15 @@ def checkInside(areaname, lat, lon, alt):
     area = areas[areaname]
     return area.checkInside(lat, lon, alt)
 
-
 def deleteArea(areaname):
     """ Delete area with name 'areaname'. """
     if areaname in areas:
         areas.pop(areaname)
         bs.scr.objappend('', areaname, None)
 
-
 def reset():
     """ Clear all data. """
     areas.clear()
-
 
 class Shape:
     def __init__(self, shape, name, coordinates, top=1e9, bottom=-1e9):
@@ -113,22 +101,22 @@ class Box(Shape):
         self.lon1 = max(coordinates[1], coordinates[3])
 
     def checkInside(self, lat, lon, alt):
-        return ((self.lat0 <= lat) & (lat <= self.lat1)) & \
+        return ((self.lat0 <=  lat) & ( lat <= self.lat1)) & \
                ((self.lon0 <= lon) & (lon <= self.lon1)) & \
                ((self.bottom <= alt) & (alt <= self.top))
+
 
 
 class Circle(Shape):
     def __init__(self, name, coordinates, top=1e9, bottom=-1e9):
         super().__init__('CIRCLE', name, coordinates, top, bottom)
-        self.clat = coordinates[0]
-        self.clon = coordinates[1]
-        self.r = coordinates[2]
+        self.clat   = coordinates[0]
+        self.clon   = coordinates[1]
+        self.r      = coordinates[2]
 
     def checkInside(self, lat, lon, alt):
         distance = kwikdist(self.clat, self.clon, lat, lon)  # [NM]
-        inside = (distance <= self.r) & (
-            self.bottom <= alt) & (alt <= self.top)
+        inside   = (distance <= self.r) & (self.bottom <= alt) & (alt <= self.top)
         return inside
 
     def __str__(self):
@@ -143,7 +131,6 @@ class Poly(Shape):
         self.border = Path(np.reshape(coordinates, (len(coordinates) // 2, 2)))
 
     def checkInside(self, lat, lon, alt):
-        points = np.vstack((lat, lon)).T
-        inside = np.all((self.border.contains_points(points),
-                         self.bottom <= alt, alt <= self.top), axis=0)
+        points = np.vstack((lat,lon)).T
+        inside = np.all((self.border.contains_points(points), self.bottom <= alt, alt <= self.top), axis=0)
         return inside
