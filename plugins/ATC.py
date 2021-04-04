@@ -28,7 +28,7 @@ VISUALIZE = True
 ROUTES = "routes/route_a.json"
 SECTORS = "sectors/sectors_a.1.json"
 FILE = "NULL"
-NEW_FILE = "case_a.3"
+NEW_FILE = "case_a.1_training"
 # Other
 MAX_AC = 12
 EPOCHS = 5000
@@ -299,10 +299,10 @@ class ATC(core.Entity):
                 normal_context = new_context
             else:
                 normal_context = np.append(
-                    keras.preprocessing.sequence.pad_sequences(normal_context, max_agents, dtype='float32'), keras.preprocessing.sequence.pad_sequences(new_context, max_agents, dtype='float32'), axis=0)
+                    keras.preprocessing.sequence.pad_sequences(normal_context, 5, dtype='float32'), keras.preprocessing.sequence.pad_sequences(new_context, 5, dtype='float32'), axis=0)
 
-        if len(normal_context) == 0:
-            normal_context = np.array([0, 0, 0, 0, 0, 0]).reshape(1, 1, 6)
+        # if len(normal_context) == 0:
+        #     normal_context = np.zeros(6).reshape(1, 1, 6)
 
         # print(normal_states.shape, normal_context.shape)
         return normal_states, normal_context
@@ -334,20 +334,26 @@ class ATC(core.Entity):
         context = []
         idx = traf.id2idx(_id)
 
-        distances = dist_matrix[:, idx]
+        distances = np.array(dist_matrix[:, idx])
+        # distances = distances.shape(len(distances))
+        distances = distances.reshape(len(distances))
+        _sorted = np.argsort(distances)
+
         this_sectors = self.traffic_manager.active_sectors[idx]
 
         this_lat, this_lon = traf.lat[idx], traf.lon[idx]
 
-        for i in range(len(distances)):
+        for i in range(len(_sorted)):
+            ac_idx = _sorted[i]
+
             # Ignore current aircraft
-            if i == idx:
+            if ac_idx == idx:
                 continue
 
-            if terminal_ac[i] > 0 or len(self.traffic_manager.active_sectors[i]) <= 0:
+            if terminal_ac[ac_idx] > 0 or len(self.traffic_manager.active_sectors[ac_idx]) <= 0:
                 continue
 
-            sectors = self.traffic_manager.active_sectors[i]
+            sectors = self.traffic_manager.active_sectors[ac_idx]
 
             # Only care if the ac in a matching sector
             flag = False
@@ -358,21 +364,22 @@ class ATC(core.Entity):
             if not flag:
                 continue
 
-            dist = get_dist([this_lat, this_lon], [traf.lat[i], traf.lon[i]])
+            dist = get_dist([this_lat, this_lon], [
+                traf.lat[ac_idx], traf.lon[ac_idx]])
 
             # Only care about visible distance aircraft
             if dist > 40:
                 continue
 
-            alt = traf.alt[i]
-            trk = traf.trk[i]
-            vs = traf.vs[i]
-            _id = traf.id[i]
+            alt = traf.alt[ac_idx]
+            trk = traf.trk[ac_idx]
+            vs = traf.vs[ac_idx]
+            _id = traf.id[ac_idx]
             route_idx = int(_id[3:])
             route = self.traffic_manager.routes[route_idx]
 
             g_dist = get_dist(self.route_manager.all_routes[int(route)]["points"][-1],
-                              [traf.lat[i], traf.lon[i]])
+                              [traf.lat[ac_idx], traf.lon[ac_idx]])
 
             self.dist[1] = max(self.dist[1], max(dist, g_dist))
             self.vs[1] = max(self.vs[1], vs)

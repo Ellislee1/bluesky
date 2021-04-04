@@ -78,7 +78,7 @@ def get_dist(pos1, pos2):
 
 
 class Agent:
-    def __init__(self, state_size, action_size, value_size, hidden_size=45):
+    def __init__(self, state_size, action_size, value_size, hidden_size=32):
         self.hidden_size = hidden_size
         self.action_size = action_size
         self.value_size = value_size
@@ -103,7 +103,7 @@ class Agent:
         if dist <= 3 and alt < 2000:
             return 1
 
-        if g_dist <= 5:
+        if g_dist <= 10:
             return 2
 
         return 0
@@ -111,7 +111,17 @@ class Agent:
     # Get the actions
     def act(self, state, context):
 
+        print(context.shape)
+
         context = context.reshape((state.shape[0], -1, 6))
+        if context.shape[1] > 5:
+            context = context[:, -5:, :]
+        if context.shape[1] < 5:
+            context = tf.keras.preprocessing.sequence.pad_sequences(
+                context, 5, dtype='float32')
+
+        print(context.shape)
+
         policy, value = self.ppo.predictor.predict({'input_states': state, 'context_input': context, 'empty': np.zeros(
             (state.shape[0], self.hidden_size))}, batch_size=state.shape[0])
 

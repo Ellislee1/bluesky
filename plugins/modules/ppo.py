@@ -3,7 +3,7 @@ import tensorflow.keras.backend as K
 
 
 class PPO():
-    def __init__(self, state_size, action_size, value_size, hidden_size=45, lr=1e-4, loss_clipping=0.2, entropy_loss=1e-4):
+    def __init__(self, state_size, action_size, value_size, hidden_size=32, lr=1e-4, loss_clipping=0.2, entropy_loss=1e-4):
         self.state_size = state_size
         self.action_size = action_size
         self.hidden_size = hidden_size
@@ -18,7 +18,7 @@ class PPO():
             shape=(self.state_size,), name='input_states')
 
         _input_context = layers.Input(
-            shape=(None, 6), name='context_input')
+            shape=(5, 6), name='context_input')
         empty = layers.Input(shape=(self.hidden_size,), name='empty')
 
         advantage = layers.Input(shape=(1,), name='A')
@@ -26,8 +26,7 @@ class PPO():
             shape=(self.action_size,), name='old_pred')
 
         # LSTM
-        h1 = layers.LSTM(self.hidden_size, activation='tanh')(
-            _input_context, initial_state=[empty, empty])
+        h1 = layers.Flatten()(_input_context)
 
         # Combine inputs
         combined = layers.concatenate([_input, h1], axis=1)
