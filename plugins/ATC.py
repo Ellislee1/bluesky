@@ -36,12 +36,12 @@ EPOCHS = 5000
 STATE_SHAPE = 6
 # ACTION_SHAPE = 3
 # VALUE_SHAPE = 3
-ACTION_SHAPE = 4
-VALUE_SHAPE = 4
+ACTION_SHAPE = 2
+VALUE_SHAPE = 2
 TIME_SEP = [20, 25, 30]
 # ACTIONS = [0, 3000, -3000]
 # ACTIONS = [-3000, 0, 3000, 0]
-ACTIONS = [36000, 0, -28000, 0]
+ACTIONS = [36000, -28000]
 
 CONSTRAINTS = {
     "alt": {
@@ -584,10 +584,10 @@ class ATC(core.Entity):
         string = "Success: {} | Fail: {} | Mean Success: {:.3f}% | (50) Mean Success Rolling {:.3f}% | Best {:.3f}%".format(
             int(self.results[0]), int(self.results[1]), (self.all_mean_success/MAX_AC)*100, (self.mean_success/MAX_AC)*100, (self.best/MAX_AC)*100)
         self.print_all(string)
-        string = "Actions -> Descend: {}, Hold Current: {}, Climb: {}, Maintain Climb: {}".format(
-            self.epoch_actions[0], self.epoch_actions[1], self.epoch_actions[2], self.epoch_actions[3])
-        # string = "Actions -> Descend: {}, Climb: {}".format(
-        #     self.epoch_actions[1], self.epoch_actions[0])
+        # string = "Actions -> Descend: {}, Hold Current: {}, Climb: {}, Maintain Climb: {}".format(
+        #     self.epoch_actions[0], self.epoch_actions[1], self.epoch_actions[2], self.epoch_actions[3])
+        string = "Actions -> Descend: {}, Climb: {}".format(
+            self.epoch_actions[1], self.epoch_actions[0])
         self.print_all(string)
 
         if self.epoch_counter+1 >= EPOCHS:

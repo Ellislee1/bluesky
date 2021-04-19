@@ -111,16 +111,12 @@ class Agent:
     # Get the actions
     def act(self, state, context):
 
-        print(context.shape)
-
         context = context.reshape((state.shape[0], -1, 6))
         if context.shape[1] > 5:
             context = context[:, -5:, :]
         if context.shape[1] < 5:
             context = tf.keras.preprocessing.sequence.pad_sequences(
                 context, 5, dtype='float32')
-
-        print(context.shape)
 
         policy, value = self.ppo.predictor.predict({'input_states': state, 'context_input': context, 'empty': np.zeros(
             (state.shape[0], self.hidden_size))}, batch_size=state.shape[0])

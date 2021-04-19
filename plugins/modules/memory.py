@@ -70,11 +70,11 @@ class Memory():
                 # alt_factor = 1
 
                 # print(dist_factor, alt_factor)
-                reward = dist_factor*alt_factor
+                reward = dist_factor
 
-            if not (action == 1 or action == 3):
-                reward += -0.15
+            # if not (action == 1 or action == 3):
+            #     reward += -0.15
                 # reward += -0.75
 
-        # print(T, action, reward)
+        print(T, action, reward)
         return reward, end
