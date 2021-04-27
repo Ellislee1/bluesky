@@ -51,7 +51,7 @@ def update_buffer(buf_id, data, offset=0, target=gl.GL_ARRAY_BUFFER):
     gl.glBufferSubData(target, offset, data.nbytes, data)
 
 
-class UniformBuffer:
+class UniformBuffer(object):
     max_binding = 1
 
     def __init__(self, data):
@@ -133,7 +133,7 @@ class BlueSkyProgram():
         gl.glUniformBlockBinding(self.program, idx, ubo.binding)
 
 
-class RenderObject:
+class RenderObject(object):
     # Attribute locations
     attrib_vertex, attrib_texcoords, attrib_lat, attrib_lon, \
         attrib_orientation, attrib_color, attrib_texdepth = list(range(7))
@@ -273,7 +273,7 @@ class RenderObject:
         return new
 
 
-class Font:
+class Font(object):
     # Attribute locations
     attrib_vertex, attrib_texcoords, attrib_lat, attrib_lon, attrib_orientation, attrib_color, attrib_texdepth = list(range(7))
 

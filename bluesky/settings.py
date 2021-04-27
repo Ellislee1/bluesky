@@ -95,7 +95,7 @@ def init(cfgfile=''):
                 fout.write(line)
 
     else:
-        print(f'Reading config from {cfgfile}')
+        print('Reading config from settings.cfg')
 
     exec(compile(open(cfgfile).read(), cfgfile, 'exec'), globals())
 

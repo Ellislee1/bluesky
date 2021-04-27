@@ -6,8 +6,9 @@ from .misc import txt2lat, txt2lon
 def txt2pos(name, reflat, reflon):
     pos = Position(name.upper().strip(), reflat, reflon)
     if not pos.error:
-        return True, pos
-    return False, name+" not found in database"
+        return True,pos
+    else:
+        return False,name+" not found in database"
 
 def islat(txt):
     # Is it a latitude-like format or not?
@@ -38,7 +39,6 @@ class Position():
 
         self.name = name # default: copy source name
         self.error = False # we're optmistic about our succes
-        self.refhdg = None
 
         # lat,lon type ?
         if name.count(",")>0: #lat,lon or apt,rwy type
@@ -54,8 +54,8 @@ class Position():
             try:
                 aptname,rwytxt = name.split("/RW")
                 rwyname = rwytxt.lstrip("Y").upper() # remove Y and spaces
-                self.lat,self.lon, self.refhdg = bs.navdb.rwythresholds[aptname][rwyname]
-            except KeyError:
+                self.lat,self.lon = bs.navdb.rwythresholds[aptname][rwyname][:2] # raises error if not found
+            except:
                 self.error = True
             self.type = "rwy"
 
@@ -97,3 +97,5 @@ class Position():
         else:
             self.error = True
             # raise error with missing data... (empty position object)
+
+        return

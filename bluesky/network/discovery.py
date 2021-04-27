@@ -11,7 +11,7 @@ IS_CLIENT = 1
 IS_REQUEST = 2
 IS_REPLY = 4
 
-class Discovery:
+class Discovery(object):
     """simple UDP ping class"""
     handle = None   # Socket for send/recv
     port = 0        # UDP port we work on

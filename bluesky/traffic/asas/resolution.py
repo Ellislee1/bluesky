@@ -2,21 +2,16 @@
 import numpy as np
 
 import bluesky as bs
-from bluesky.core import Entity
-from bluesky.stack import command
+from bluesky.tools.replaceable import ReplaceableSingleton
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
 
 
 bs.settings.set_variable_defaults(asas_mar=1.01)
 
-
-class ConflictResolution(Entity, replaceable=True):
+class ConflictResolution(ReplaceableSingleton, TrafficArrays):
     ''' Base class for Conflict Resolution implementations. '''
-    # ConflictResolution on/off switch. Set to True whenever another
-    # implementation than the base implementation (ConflictResolution) is selected.
-    do_cr = False
-
     def __init__(self):
-        super().__init__()
+        TrafficArrays.__init__(self)
         # [-] switch to activate priority rules for conflict resolution
         self.swprio = False  # switch priority on/off
         self.priocode = ''  # select priority mode
@@ -28,7 +23,7 @@ class ConflictResolution(Entity, replaceable=True):
         self.resofach = bs.settings.asas_mar
         self.resofacv = bs.settings.asas_mar
 
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             self.resooffac = np.array([], dtype=np.bool)
             self.noresoac = np.array([], dtype=np.bool)
             # whether the autopilot follows ASAS or not
@@ -37,42 +32,6 @@ class ConflictResolution(Entity, replaceable=True):
             self.tas = np.array([])  # speed provided by the ASAS (eas) [m/s]
             self.alt = np.array([])  # alt provided by the ASAS [m]
             self.vs = np.array([])  # vspeed provided by the ASAS [m/s]
-
-    # By default all channels are controlled by self.active,
-    # but they can be overloaded with separate variables or functions in a
-    # derived ASAS Conflict Resolution class (@property decorator takes away
-    # need for brackets when calling it so it can be overloaded by a variable)
-    @property
-    def hdgactive(self):
-        ''' Return a boolean array sized according to the number of aircraft
-            with True for all elements where heading is currently controlled by
-            the conflict resolution algorithm.
-        '''
-        return self.active
-
-    @property
-    def vsactive(self):
-        ''' Return a boolean array sized according to the number of aircraft
-            with True for all elements where vertical speed is currently
-            controlled by the conflict resolution algorithm.
-        '''
-        return self.active
-
-    @property
-    def altactive(self):
-        ''' Return a boolean array sized according to the number of aircraft
-            with True for all elements where altitude is currently controlled by
-            the conflict resolution algorithm.
-        '''
-        return self.active
-
-    @property
-    def tasactive(self):
-        ''' Return a boolean array sized according to the number of aircraft
-            with True for all elements where speed is currently controlled by
-            the conflict resolution algorithm.
-        '''
-        return self.active
 
     def resolve(self, conf, ownship, intruder):
         '''
@@ -88,10 +47,9 @@ class ConflictResolution(Entity, replaceable=True):
 
     def update(self, conf, ownship, intruder):
         ''' Perform an update step of the Conflict Resolution implementation. '''
-        if ConflictResolution.do_cr:
-            if conf.confpairs:
-                self.trk, self.tas, self.vs, self.alt = self.resolve(conf, ownship, intruder)
-            self.resumenav(conf, ownship, intruder)
+        if conf.confpairs:
+            self.trk, self.tas, self.vs, self.alt = self.resolve(conf, ownship, intruder)
+        self.resumenav(conf, ownship, intruder)
 
     def resumenav(self, conf, ownship, intruder):
         '''
@@ -140,9 +98,8 @@ class ConflictResolution(Entity, replaceable=True):
                 # If two aircraft are getting in and out of conflict continously,
                 # then they it is a bouncing conflict. ASAS should stay active until
                 # the bouncing stops.
-                is_bouncing = \
-                    abs(ownship.trk[idx1] - intruder.trk[idx2]) < 30.0 and \
-                    hdist < conf.rpz * self.resofach
+                is_bouncing = abs(
+                    ownship.trk[idx1] - intruder.trk[idx2]) < 30.0 and hdist < conf.rpz * self.resofach
 
             # Start recovery for ownship if intruder is deleted, or if past CPA
             # and not in horizontal LOS or a bouncing conflict
@@ -173,76 +130,64 @@ class ConflictResolution(Entity, replaceable=True):
         # Remove pairs from the list that are past CPA or have deleted aircraft
         self.resopairs -= delpairs
 
-    @command(name='PRIORULES')
-    def setprio(self, flag : bool = None, priocode=''):
-        ''' Define priority rules (right of way) for conflict resolution. '''
+    def setprio(self, flag=None, priocode=''):
+        ''' Set the prio switch and the type of prio '''
         if flag is None:
             if self.__class__ is ConflictResolution:
-                return False, 'No conflict resolution enabled.'
-            return False, f'Resolution algorithm {self.__class__.name} hasn\'t implemented priority.'
+                return False, 'No conflict resolution enabled, or no prio.'
+            else:
+                return False, f'Resolution algorithm {self.__class__.name} hasn\'t implemented priority.'
 
         self.swprio = flag
         self.priocode = priocode
         return True
 
-    @command(name='NORESO')
-    def setnoreso(self, *idx : 'acid'):
+    def setnoreso(self, idx=None):
         ''' ADD or Remove aircraft that nobody will avoid.
         Multiple aircraft can be sent to this function at once. '''
-        if not idx:
+        if idx is None:
             return True, 'NORESO [ACID, ... ] OR NORESO [GROUPID]' + \
                          '\nCurrent list of aircraft nobody will avoid:' + \
                          ', '.join(np.array(bs.traf.id)[self.noresoac])
-        idx = list(idx)
         self.noresoac[idx] = np.logical_not(self.noresoac[idx])
-        return True
 
-    @command(name='RESOOFF')
-    def setresooff(self, *idx : 'acid'):
-        ''' ADD or Remove aircraft that will not avoid anybody else.
-            Multiple aircraft can be sent to this function at once. '''
-        if not idx:
+    def setresooff(self, idx=None):
+        ''' ADD or Remove aircraft that will not avoid anybody else. '''
+        if idx is None:
             return True, 'NORESO [ACID, ... ] OR NORESO [GROUPID]' + \
                          '\nCurrent list of aircraft will not avoid anybody:' + \
                          ', '.join(np.array(bs.traf.id)[self.resooffac])
-        idx = list(idx)
         self.resooffac[idx] = np.logical_not(self.resooffac[idx])
-        return True
 
-    @command(name='RFACH', aliases=('RESOFACH',))
-    def setresofach(self, factor : float = None):
-        ''' Set resolution factor horizontal
-            (to maneuver only a fraction of a resolution vector)
-        '''
-        if factor is None:
+    def setresofach(self, value=None):
+        ''' Set the horizontal resolution factor. '''
+        if value is None:
             return True, f'RFACH [FACTOR]\nCurrent horizontal resolution factor is: {self.resofach}'
-        self.resofach = factor
+        self.resofach = value
+
         return True, f'Horizontal resolution factor set to {self.resofach}'
 
-    @command(name='RFACV', aliases=('RESOFACV',))
-    def setresofacv(self, factor : float = None):
-        ''' Set resolution factor vertical (to maneuver only a fraction of a resolution vector). '''
-        if factor is None:
+    def setresofacv(self, value=None):
+        ''' Set the vertical resolution factor. '''
+        if value is None:
             return True, f'RFACV [FACTOR]\nCurrent vertical resolution factor is: {self.resofacv}'
-        self.resofacv = factor
+        self.resofacv = value
+
         return True, f'Vertical resolution factor set to {self.resofacv}'
 
-    @staticmethod
-    @command(name='RESO')
-    def setmethod(name : 'txt' = ''):
-        ''' Select a Conflict Resolution method. '''
+    @classmethod
+    def setmethod(cls, name=''):
+        ''' Select a CR method. '''
         # Get a dict of all registered CR methods
-        methods = ConflictResolution.derived()
+        methods = cls.derived()
         names = ['OFF' if n == 'CONFLICTRESOLUTION' else n for n in methods]
-
+        
         if not name:
-            curname = 'OFF' if ConflictResolution.selected() is ConflictResolution \
-                else ConflictResolution.selected().__name__
+            curname = 'OFF' if cls.selected() is ConflictResolution else cls.selected().__name__
             return True, f'Current CR method: {curname}' + \
                          f'\nAvailable CR methods: {", ".join(names)}'
         # Check if the requested method exists
         if name == 'OFF':
-            ConflictResolution.do_cr = False
             ConflictResolution.select()
             return True, 'Conflict Resolution turned off.'
         method = methods.get(name, None)
@@ -252,5 +197,4 @@ class ConflictResolution(Entity, replaceable=True):
 
         # Select the requested method
         method.select()
-        ConflictResolution.do_cr = True
         return True, f'Selected {method.__name__} as CR method.'

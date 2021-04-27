@@ -33,6 +33,25 @@ else:
     mpl = True
     print('[OK]')
 
+# Machine Learning Ellis RL:
+print("Checking for tensorflow         ", end=' ')
+try:
+    import tensorflow
+except ImportError:
+    print("[FAIL]")
+else:
+    mpl = True
+    print('[OK]')
+
+print("Checking for geopy         ", end=' ')
+try:
+    import geopy
+except ImportError:
+    print("[FAIL]")
+else:
+    mpl = True
+    print('[OK]')
+
 # Graphical libs and capabilities
 
 print("Checking for pyqt               ", end=' ')
@@ -80,6 +99,10 @@ if qt:
 
                 class GLTest(QGLWidget):
                     gl_version = 0.0
+
+                    def __init__(self):
+                        super(GLTest, self).__init__()
+
                     def initializeGL(self):
                         GLTest.gl_version = float(ogl.glGetString(ogl.GL_VERSION)[:3])
 

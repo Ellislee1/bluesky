@@ -8,24 +8,24 @@ except ImportError:
     from collections import Collection
 import bluesky as bs
 from bluesky.tools import geo
-from bluesky.tools.misc import degto180
+from bluesky.tools.simtime import timed_function
 from bluesky.tools.position import txt2pos
 from bluesky.tools.aero import ft, nm, vcasormach2tas, vcas2tas, tas2cas, cas2tas, g0
-from bluesky.core import Entity, timed_function
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
+from bluesky.tools.replaceable import ReplaceableSingleton
 from .route import Route
 
-bs.settings.set_variable_defaults(fms_dt=10.5)
+bs.settings.set_variable_defaults(fms_dt=1.0)
 
-
-class Autopilot(Entity, replaceable=True):
+class Autopilot(ReplaceableSingleton, TrafficArrays):
     def __init__(self):
-        super().__init__()
+        TrafficArrays.__init__(self)
 
         # Standard self.steepness for descent
         self.steepness = 3000. * ft / (10. * nm)
 
         # From here, define object arrays
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
 
             # FMS directions
             self.trk = np.array([])
@@ -39,11 +39,7 @@ class Autopilot(Entity, replaceable=True):
             self.swvnavvs = np.array([])  # whether to use given VS or not
             self.vnavvs   = np.array([])  # vertical speed in VNAV
 
-            # LNAV variables
-            self.qdr2wp   = np.array([]) # Direction to waypoint from the last time passing was checked
-                                         # to avoid 180 turns due to updated qdr shortly before passing wp
-
-             # Traffic navigation information
+            # Traffic navigation information
             self.orig = []  # Four letter code of origin airport
             self.dest = []  # Four letter code of destination airport
 
@@ -51,25 +47,20 @@ class Autopilot(Entity, replaceable=True):
             self.route = []
 
     def create(self, n=1):
-        super().create(n)
+        super(Autopilot, self).create(n)
 
         # FMS directions
         self.tas[-n:] = bs.traf.tas[-n:]
         self.trk[-n:] = bs.traf.trk[-n:]
         self.alt[-n:] = bs.traf.alt[-n:]
 
-        # LNAV variables
-        self.qdr2wp[-n:] = -999   # Direction to waypoint from the last time passing was checked
-        # to avoid 180 turns due to updated qdr shortly before passing wp
-
         # VNAV Variables
         self.dist2vs[-n:] = -999.
 
         # Route objects
-        for ridx, acid in enumerate(bs.traf.id[-n:]):
-            self.route[ridx - n] = Route(acid)
+        self.route[-n:] = [Route() for _ in range(n)]
 
-    @timed_function(name='fms', dt=bs.settings.fms_dt, manual=True)
+    @timed_function('fms', dt=bs.settings.fms_dt)
     def update_fms(self, qdr, dist):
         # Shift waypoints for aircraft i where necessary
         for i in bs.traf.actwp.Reached(qdr, dist, bs.traf.actwp.flyby,
@@ -79,7 +70,7 @@ class Autopilot(Entity, replaceable=True):
             # where this speed is specified, so we need to save it for use now
             # before getting the new data for the next waypoint
 
-            # Get speed for next leg from the waypoint we pass now
+            # Get speed for next leg from the waypoint we now
             bs.traf.actwp.spd[i]    = bs.traf.actwp.nextspd[i]
             bs.traf.actwp.spdcon[i] = bs.traf.actwp.nextspd[i]
 
@@ -101,13 +92,8 @@ class Autopilot(Entity, replaceable=True):
                 bs.traf.actwp.next_qdr[i] =      \
                 self.route[i].getnextwp()  # note: xtoalt,toalt in [m]
 
-            # End of route/no more waypoints: switch off LNAV using the lnavon
-            # switch returned by getnextwp
-            if not lnavon and bs.traf.swlnav[i]:
-                bs.traf.swlnav[i] = False
-                # Last wp: copy last wp values for alt and speed in autopilot
-                if bs.traf.swvnavspd[i] and bs.traf.actwp.nextspd[i]>= 0.0:
-                    bs.traf.selspd[i] = bs.traf.actwp.nextspd[i]
+            # End of route/no more waypoints: switch off LNAV
+            bs.traf.swlnav[i] = bs.traf.swlnav[i] and lnavon
 
             # In case of no LNAV, do not allow VNAV mode on its own
             bs.traf.swvnav[i] = bs.traf.swvnav[i] and bs.traf.swlnav[i]
@@ -131,10 +117,8 @@ class Autopilot(Entity, replaceable=True):
                     bs.traf.selspd[i] = bs.traf.actwp.spd[i]
 
             # Update qdr and turndist for this new waypoint for ComputeVNAV
-            qdr[i], distnmi = geo.qdrdist(bs.traf.lat[i], bs.traf.lon[i],
+            qdr[i], dummy = geo.qdrdist(bs.traf.lat[i], bs.traf.lon[i],
                                         bs.traf.actwp.lat[i], bs.traf.actwp.lon[i])
-
-            dist[i] = distnmi*nm
 
             # Update turndist so ComputeVNAV works, is there a next leg direction or not?
             if bs.traf.actwp.next_qdr[i] < -900.:
@@ -142,42 +126,28 @@ class Autopilot(Entity, replaceable=True):
             else:
                 local_next_qdr = bs.traf.actwp.next_qdr[i]
 
-            # Get flyturn switches and data
-            bs.traf.actwp.flyturn[i]     = flyturn
-            bs.traf.actwp.turnrad[i]     = turnrad
-
-            # Pass on whether currently flyturn mode:
-            # at beginning of leg,c copy tonextwp to lastwp
-            # set next turn False
-            bs.traf.actwp.turnfromlastwp[i] = bs.traf.actwp.turntonextwp[i]
-            bs.traf.actwp.turntonextwp[i]   = False
-
-            # Keep both turning speeds: turn to leg and turn from leg
-            bs.traf.actwp.oldturnspd[i]  = bs.traf.actwp.turnspd[i] # old turnspd, turning by this waypoint
-            if bs.traf.actwp.flyturn[i]:
-                bs.traf.actwp.turnspd[i] = turnspd                  # new turnspd, turning by next waypoint
-            else:
-                bs.traf.actwp.turnspd[i] = -990.
+            bs.traf.actwp.flyturn[i] = flyturn
+            bs.traf.actwp.turnrad[i] = turnrad
+            bs.traf.actwp.turnspd[i] = turnspd
 
             # Calculate turn dist (and radius which we do not use) now for scalar variable [i]
             bs.traf.actwp.turndist[i], dummy = \
                 bs.traf.actwp.calcturn(bs.traf.tas[i], bs.traf.bank[i],
                                         qdr[i], local_next_qdr,turnrad)  # update turn distance for VNAV
 
-            # Reduce turn dist for reduced turnspd
-            if bs.traf.actwp.flyturn[i] and bs.traf.actwp.turnrad[i]<0.0 and bs.traf.actwp.turnspd[i]>0.:
-                turntas = cas2tas(bs.traf.actwp.turnspd[i], bs.traf.alt[i])
-                bs.traf.actwp.turndist[i] = bs.traf.actwp.turndist[i]*turntas*turntas/(bs.traf.tas[i]*bs.traf.tas[i])
 
             # VNAV = FMS ALT/SPD mode incl. RTA
             self.ComputeVNAV(i, toalt, bs.traf.actwp.xtoalt[i], bs.traf.actwp.torta[i],
                              bs.traf.actwp.xtorta[i])
 
-        # End of per waypoint i switching loop
-        # Update qdr2wp with up-to-date qdr, now that we have checked passing wp
-        self.qdr2wp = qdr%360.
+            # Check deceleration distance before next wp in case of turns
+            bs.traf.actwp.deceldist[i] = np.where(flyturn,
+                                     (bs.traf.tas[i] - cas2tas(turnspd, bs.traf.alt[i])) * 0.5 *
+                                     (bs.traf.tas[i] - cas2tas(turnspd, bs.traf.alt[i])) / max(0.001, bs.traf.ax[i])
+                                      , 0.0)
 
-        # Continuous guidance when speed constraint on active leg is in update-method
+        # Continuous guidance when speed constraint on active leg
+
 
         # If still an RTA in the route and currently no speed constraint
         for iac in np.where((bs.traf.actwp.torta > -99.)*(bs.traf.actwp.spdcon<0.0))[0]:
@@ -201,11 +171,11 @@ class Autopilot(Entity, replaceable=True):
         # qdr[deg],distinnm[nm]
         qdr, distinnm = geo.qdrdist(bs.traf.lat, bs.traf.lon,
                                     bs.traf.actwp.lat, bs.traf.actwp.lon)  # [deg][nm])
-        self.qdr2wp  = qdr
-        dist2wp = distinnm*nm  # Conversion to meters
+        dist = distinnm*nm  # Conversion to meters
 
-        # FMS route update and possibly waypoint shift. Note: qdr, dist2wp will be updated accordingly in case of wp switch
-        self.update_fms(qdr, dist2wp) # Updates self.qdr2wp when necessary
+
+        # FMS route update
+        self.update_fms(qdr, dist)
 
         #================= Continuous FMS guidance ========================
 
@@ -213,9 +183,9 @@ class Autopilot(Entity, replaceable=True):
         # Code below is vectorized, with arrays for all aircraft
 
         # Do VNAV start of descent check
-        #dy = (bs.traf.actwp.lat - bs.traf.lat)  #[deg lat = 60 nm]
-        #dx = (bs.traf.actwp.lon - bs.traf.lon) * bs.traf.coslat #[corrected deg lon = 60 nm]
-        #dist2wp   = 60. * nm * np.sqrt(dx * dx + dy * dy) # [m]
+        dy = (bs.traf.actwp.lat - bs.traf.lat)  #[deg lat = 60 nm]
+        dx = (bs.traf.actwp.lon - bs.traf.lon) * bs.traf.coslat #[corrected deg lon = 60 nm]
+        dist2wp   = 60. * nm * np.sqrt(dx * dx + dy * dy) # [m]
 
         # VNAV logic: descend as late as possible, climb as soon as possible
         startdescent = (dist2wp < self.dist2vs) + (bs.traf.actwp.nextaltco > bs.traf.alt)
@@ -226,7 +196,7 @@ class Autopilot(Entity, replaceable=True):
         #    while descending to the destination (the last waypoint)
         #    Use 0.1 nm (185.2 m) circle in case turndist might be zero
         self.swvnavvs = bs.traf.swvnav * np.where(bs.traf.swlnav, startdescent,
-                                        dist2wp <= np.maximum(185.2,bs.traf.actwp.turndist))
+                                        dist <= np.maximum(185.2,bs.traf.actwp.turndist))
 
         #Recalculate V/S based on current altitude and distance to next alt constraint
         # How much time do we have before we need to descend?
@@ -251,82 +221,34 @@ class Autopilot(Entity, replaceable=True):
         bs.traf.selalt = np.where(self.swvnavvs,bs.traf.actwp.nextaltco,bs.traf.selalt)
 
         # LNAV commanded track angle
-        self.trk = np.where(bs.traf.swlnav, self.qdr2wp, self.trk)
+        self.trk = np.where(bs.traf.swlnav, qdr, self.trk)
 
         # FMS speed guidance: anticipate accel/decel distance for next leg or turn
 
-        # Calculate actual distance it takes to decelerate/accelerate based on two cases: turning speed (decel)
-
+        # Actual distance it takes to decelerate
         # Normally next leg speed (actwp.spd) but in case we fly turns with a specified turn speed
         # use the turn speed
-
-        # Is turn speed specified and are we not already slow enough? We only decelerate for turns, not accel.
-        turntas       = np.where(bs.traf.actwp.turnspd>0.0, vcas2tas(bs.traf.actwp.turnspd, bs.traf.alt),
-                                 -1.0+0.*bs.traf.tas)
-        swturnspd     = bs.traf.actwp.flyturn*(turntas>0.0)*(bs.traf.actwp.turnspd>0.0)
-        turntasdiff   = np.maximum(0.,(bs.traf.tas - turntas)*(turntas>0.0))
-
-        # dt = dv/a ;  dx = v*dt + 0.5*a*dt2 => dx = dv/a * (v + 0.5*dv)
-        ax = bs.traf.perf.acceleration()
-        dxturnspdchg  = np.where(swturnspd, np.abs(turntasdiff)/np.maximum(0.01,ax)*(bs.traf.tas+0.5*np.abs(turntasdiff)),
-                                                                   0.0*bs.traf.tas)
-
-        # Decelerate or accelerate for next required speed because of speed constraint or RTA speed
-        nexttas   = vcasormach2tas(bs.traf.actwp.nextspd,bs.traf.alt)
-        tasdiff   = (nexttas - bs.traf.tas)*(bs.traf.actwp.spd>=0.) # [m/s]
+        swturnspd = bs.traf.actwp.flyturn*(bs.traf.actwp.turnspd>0.001)
+        nexttas   = np.where(swturnspd,
+                             vcas2tas(bs.traf.actwp.turnspd,bs.traf.alt),
+                             vcasormach2tas(bs.traf.actwp.spd,bs.traf.alt))
+        tasdiff   = nexttas - bs.traf.tas # [m/s]
 
         # dt = dv/a   dx = v*dt + 0.5*a*dt2 => dx = dv/a * (v + 0.5*dv)
-        dxspdconchg = np.abs(tasdiff)/np.maximum(0.01, np.abs(ax)) * (bs.traf.tas+0.5*np.abs(tasdiff))
-
+        dxspdchg = swturnspd*bs.traf.actwp.turndist + np.sign(tasdiff)/np.maximum(0.01,np.abs(bs.traf.ax)) * \
+                   (bs.traf.tas+0.5*tasdiff)
 
         # Check also whether VNAVSPD is on, if not, SPD SEL has override for next leg
         # and same for turn logic
-        usenextspdcon = (dist2wp < dxspdconchg)*(bs.traf.actwp.nextspd> -990.) * \
-                            bs.traf.swvnavspd*bs.traf.swvnav*bs.traf.swlnav
-        useturnspd = np.logical_or(bs.traf.actwp.turntonextwp,(dist2wp < dxturnspdchg+bs.traf.actwp.turndist) *\
-                                                              swturnspd*bs.traf.swvnavspd*bs.traf.swvnav*bs.traf.swlnav)
+        usespdcon      = (dist2wp < dxspdchg)*(bs.traf.actwp.spdcon > -990.) * \
+                            bs.traf.swvnavspd*bs.traf.swvnav
 
-        # Hold turn mode can only be switched on here, cannot be switched off here (happeps upon passing wp)
-        bs.traf.actwp.turntonextwp = np.logical_or(bs.traf.actwp.turntonextwp,useturnspd)
-
-        # Which CAS/Mach do we have to keep? VNAV, last turn or next turn?
-        oncurrentleg = (abs(degto180(bs.traf.trk - qdr)) < 2.0) # [deg]
-        inoldturn    = (bs.traf.actwp.oldturnspd > 0.) * np.logical_not(oncurrentleg)
-
-        # Avoid using old turning speeds when turning of this leg to the next leg
-        # by disabling (old) turningspd when on leg
-        bs.traf.actwp.oldturnspd = np.where(oncurrentleg*(bs.traf.actwp.oldturnspd>0.), -999.,
-                                            bs.traf.actwp.oldturnspd)
-
-        # turnfromlastwp can only be switched off here, not on (latter happens upon passing wp)
-        bs.traf.actwp.turnfromlastwp = np.logical_and(bs.traf.actwp.turnfromlastwp,inoldturn)
-
-        # Select speed: turn sped, next speed constraint, or current speed constraint
-        bs.traf.selspd = np.where(useturnspd,bs.traf.actwp.turnspd,
-                                  np.where(usenextspdcon, bs.traf.actwp.nextspd,
-                                           np.where((bs.traf.actwp.spdcon>0)*bs.traf.swvnavspd,bs.traf.actwp.spd,
-                                                                            bs.traf.selspd)))
-
-
-        # Temporary override when still in old turn
-        bs.traf.selspd = np.where(inoldturn*(bs.traf.actwp.oldturnspd>0.)*bs.traf.swvnavspd*bs.traf.swvnav*bs.traf.swlnav,
-                                  bs.traf.actwp.oldturnspd,bs.traf.selspd)
-
-        #debug if inoldturn[0]:
-        #debug     print("inoldturn bs.traf.trk =",bs.traf.trk[0],"qdr =",qdr)
-        #debug elif usenextspdcon[0]:
-        #debug     print("usenextspdcon")
-        #debug elif useturnspd[0]:
-        #debug     print("useturnspd")
-        #debug elif bs.traf.actwp.spdcon>0:
-        #debug     print("using current speed constraint")
-        #debug else:
-        #debug     print("no speed given")
+        bs.traf.selspd = np.where(usespdcon, np.where(swturnspd,bs.traf.actwp.turnspd,
+                                                      bs.traf.actwp.spd), bs.traf.selspd)
 
         # Below crossover altitude: CAS=const, above crossover altitude: Mach = const
         self.tas = vcasormach2tas(bs.traf.selspd, bs.traf.alt)
 
-        return
 
     def ComputeVNAV(self, idx, toalt, xtoalt, torta, xtorta):
         # debug print ("ComputeVNAV for",bs.traf.id[idx],":",toalt/ft,"ft  ",xtoalt/nm,"nm")
@@ -516,7 +438,7 @@ class Autopilot(Entity, replaceable=True):
             vnwnd, vewnd = bs.traf.wind.getdata(bs.traf.lat[iab], bs.traf.lon[iab], bs.traf.alt[iab])
             gsnorth = tasnorth + vnwnd
             gseast = taseast + vewnd
-            self.trk[iab] = np.degrees(np.arctan2(gseast, gsnorth))%360.
+            self.trk[iab] = np.degrees(np.arctan2(gseast, gsnorth))
             self.trk[ibel] = hdg
         else:
             self.trk[idx] = hdg
@@ -540,13 +462,20 @@ class Autopilot(Entity, replaceable=True):
         if len(args) == 0:
             if cmd == 'DEST':
                 return True, 'DEST ' + bs.traf.id[idx] + ': ' + self.dest[idx]
-            return True, 'ORIG ' + bs.traf.id[idx] + ': ' + self.orig[idx]
+            else:
+                return True, 'ORIG ' + bs.traf.id[idx] + ': ' + self.orig[idx]
+
+        if idx<0 or idx>=bs.traf.ntraf:
+            return False, cmd + ": Aircraft does not exist."
 
         route = self.route[idx]
+
         name = args[0]
+
         apidx = bs.navdb.getaptidx(name)
 
         if apidx < 0:
+
             if cmd =="DEST" and bs.traf.ap.route[idx].nwp>0:
                 reflat = bs.traf.ap.route[idx].wplat[-1]
                 reflon = bs.traf.ap.route[idx].wplon[-1]
@@ -687,8 +616,6 @@ def calcvrta(v0, dx, deltime, trafax):
     # Calculate required target ground speed v1 [m/s]
     # to meet an RTA at this leg
     #
-    # Arguments are scalar
-    #
     #   v0      = current ground speed [m/s]
     #   dx      = leg distance [m]
     #   deltime = time left till RTA[s]
@@ -699,9 +626,9 @@ def calcvrta(v0, dx, deltime, trafax):
 
     # Do we need decelerate or accelerate
     if v0 * dt < dx:
-        ax = max(0.01,abs(trafax))
+        ax = abs(trafax)
     else:
-        ax = -max(0.01,abs(trafax))
+        ax = -abs(trafax)
 
     # Solve 2nd order equation for v1 which results from:
     #

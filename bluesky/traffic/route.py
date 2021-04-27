@@ -3,11 +3,12 @@ from os import path
 from numpy import *
 import bluesky as bs
 from bluesky.tools import geo
-from bluesky.core import Replaceable
+from bluesky.tools.replaceable import Replaceable
 from bluesky.tools.aero import ft, kts, g0, nm, mach2cas, casormach2tas
-from bluesky.tools.misc import degto180, txt2tim, txt2alt, txt2spd
+from bluesky.tools.misc import degto180,txt2tim,txt2spd
 from bluesky.tools.position import txt2pos
 from bluesky import stack
+from bluesky.stack import Argparser
 
 
 class Route(Replaceable):
@@ -31,10 +32,8 @@ class Route(Replaceable):
     calcwp   = 4   # Calculated waypoint (T/C, T/D, A/C)
     runway   = 5   # Runway: Copy name and positions
 
-    def __init__(self, acid):
-        # Aircraft id (callsign) of the aircraft to which this route belongs
-        self.acid = acid
-        self.nwp = 0
+    def __init__(self):
+        self.nwp    = 0
 
         # Waypoint data
         self.wpname = []
@@ -68,6 +67,7 @@ class Route(Replaceable):
         # default: False
         self.flag_landed_runway = False
 
+        self.iac = None
         self.wpdirfrom = []
         self.wpdistto  = []
         self.wpialt    = []
@@ -411,18 +411,20 @@ class Route(Replaceable):
                     if alttxt.count('-') > 1: # "----" = delete
                         self.wpalt[wpidx]  = -999.
                     else:
-                        try:
-                            self.wpalt[wpidx] = txt2alt(alttxt)
-                        except ValueError as e:
+                        parser = Argparser(['alt'], [False], alttxt)
+                        if parser.parse():
+                            self.wpalt[wpidx] = parser.arglist[0]
+                        else:
                             success = False
 
                     # Edit waypoint speed constraint
                     if spdtxt.count('-') > 1: # "----" = delete
                         self.wpspd[wpidx]  = -999.
                     else:
-                        try:
-                            self.wpalt[wpidx] = txt2spd(spdtxt)
-                        except ValueError as e:
+                        parser = Argparser(['spd'], [False], spdtxt)
+                        if parser.parse():
+                            self.wpspd[wpidx] = parser.arglist[0]
+                        else:
                             success = False
 
                     if not success:
@@ -442,17 +444,19 @@ class Route(Replaceable):
 
                     # Edit waypoint altitude constraint
                     if swalt:
-                        try:
-                            self.wpalt[wpidx] = txt2alt(args[2])
-                        except ValueError as e:
-                            return False, e.args[0]
+                        parser = Argparser(['alt'], [False], args[2])
+                        if parser.parse():
+                            self.wpalt[wpidx] = parser.arglist[0]
+                        else:
+                            return False,'Could not parse "' + args[2] + '" as altitude'
 
                     # Edit waypoint speed constraint
                     elif swspd:
-                        try:
-                            self.wpspd[wpidx] = txt2spd(args[2])
-                        except ValueError as e:
-                            return False, e.args[0]
+                        parser = Argparser(['spd'], [False], args[2])
+                        if parser.parse():
+                            self.wpspd[wpidx] = parser.arglist[0]
+                        else:
+                            return False,'Could not parse "' + args[2] + '" as speed'
 
                     # Delete a constraint (or both) at this waypoint
                     elif args[1]=="DEL" or args[1]=="DELETE":
@@ -542,6 +546,7 @@ class Route(Replaceable):
 #        print ("spd = ",spd)
 #        print ("afterwp ="+afterwp)
 #        print
+        self.iac = iac    # a/c to which this route belongs
         # For safety
         self.nwp = len(self.wplat)
 
@@ -811,18 +816,11 @@ class Route(Replaceable):
                 else:
                     txt += "M" + str(self.wpspd[i])
 
-                # Type: orig, dest, C = flyby, | = flyover, U = flyturn
+                # Type
                 if self.wptype[i] == Route.orig:
                     txt += "[orig]"
                 elif self.wptype[i] == Route.dest:
                     txt += "[dest]"
-                elif self.wpflyturn[i]:
-                    txt += "[U]"
-                elif self.wpflyby[i]:
-                    txt += "[C]"
-                else: # FLYOVER
-                    txt += "[|]"
-
 
                 # Display message
                 bs.scr.echo(txt)
@@ -851,24 +849,24 @@ class Route(Replaceable):
             # Change RW06,RWY18C,RWY24001 to resp. 06,18C,24
             if "RWY" in name:
                 rwykey = name[8:10]
-                if not name[10].isdigit():
+                if not name[10].isidigit():
                     rwykey = rwykey+name[10]
             # also if it is only RW
             else:
                 rwykey = name[7:9]
-                if not name[9].isdigit():
+                if not name[9].isidigit():
                     rwykey = rwykey+name[9]
 
             wphdg = bs.navdb.rwythresholds[name[:4]][rwykey][2]
 
             # keep constant runway heading
-            stack.stack("HDG " + str(self.acid) + " " + str(wphdg))
+            stack.stack("HDG " + str(bs.traf.id[self.iac]) + " " + str(wphdg))
 
             # start decelerating
-            stack.stack("DELAY " + "10 " + "SPD " + str(self.acid) + " " + "10")
+            stack.stack("DELAY " + "10 " + "SPD " + str(bs.traf.id[self.iac]) + " " + "10")
 
             # delete aircraft
-            stack.stack("DELAY " + "42 " + "DEL " + str(self.acid))
+            stack.stack("DELAY " + "42 " + "DEL " + str(bs.traf.id[self.iac]))
 
             return self.wplat[self.iactwp],self.wplon[self.iactwp],   \
                            self.wpalt[self.iactwp],self.wpspd[self.iactwp],   \
@@ -976,13 +974,12 @@ class Route(Replaceable):
             self.delwpt("A/C")
 
         # Insert actual position as A/C waypoint
-        acidx = bs.traf.id2idx(self.acid)
         idx = self.iactwp
         self.insertcalcwp(idx,"A/C")
-        self.wplat[idx] = bs.traf.lat[acidx] # deg
-        self.wplon[idx] = bs.traf.lon[acidx] # deg
-        self.wpalt[idx] = bs.traf.alt[acidx] # m
-        self.wpspd[idx] = bs.traf.tas[acidx] # m/s
+        self.wplat[idx] = bs.traf.lat[self.iac] # deg
+        self.wplon[idx] = bs.traf.lon[self.iac] # deg
+        self.wpalt[idx] = bs.traf.alt[self.iac] # m
+        self.wpspd[idx] = bs.traf.tas[self.iac] # m/s
 
         # Calculate distance to last waypoint in route
         nwp = len(self.wpname)
@@ -1007,8 +1004,8 @@ class Route(Replaceable):
 
         # Find longest segment without altitude constraints
 
-        desslope = clbslope = 1.0
-        crzalt = bs.traf.crzalt[acidx]
+        desslope = clbslope = 1.
+        crzalt = bs.traf.crzalt[self.iac]
         if crzalt>0.:
             ilong  = -1
             dxlong = 0.0

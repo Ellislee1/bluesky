@@ -6,8 +6,7 @@ except ImportError:
     # In python <3.3 collections.abc doesn't exist
     from collections import Collection
 from bluesky import stack, traf, sim  #, settings, navdb, traf, sim, scr, tools
-from bluesky.core import Entity, timed_function
-from bluesky.tools import areafilter, datalog, plotter, geo
+from bluesky.tools import areafilter, datalog, plotter, geo, TrafficArrays
 from bluesky.tools.aero import nm, ft
 
 # Metrics object
@@ -49,7 +48,7 @@ class SectorData:
         self.dist0 = np.append(self.dist0, dist0)
         self.acid.extend(acid)
 
-class Metrics(Entity):
+class Metrics(TrafficArrays):
     def __init__(self):
         super().__init__()
         # List of sectors known to this plugin.
@@ -80,9 +79,7 @@ class Metrics(Entity):
         # n = len(idx) if isinstance(idx, Collection) else 1
         # print(n, 'aircraft deleted, ntraf =', traf.ntraf, 'idx =', idx, 'len(traf.lat) =', len(traf.lat))
 
-    @timed_function(dt=2.5)
     def update(self):
-        ''' Periodic update function for metrics calculation. '''
         self.sectorsd = np.zeros(len(self.sectors))
         self.sectorconv = np.zeros(len(self.sectors))
         self.sectoreff = []
@@ -176,6 +173,7 @@ class Metrics(Entity):
         if sendeff:
             self.effplot.send()
 
+
     def reset(self):
         if self.fconv:
             self.fconv.close()
@@ -184,22 +182,22 @@ class Metrics(Entity):
         if self.feff:
             self.feff.close()
 
-    @stack.command(name='METRICS')
     def stackio(self, cmd, name):
-        ''' Calculate a set of metrics within specified sectors. '''
         if cmd == 'LIST':
             if not self.sectors:
                 return True, 'No registered sectors available'
-            return True, 'Registered sectors:', str.join(', ', self.sectors)
+            else:
+                return True, 'Registered sectors:', str.join(', ', self.sectors)
         elif cmd == 'ADDSECTOR':
             if name == 'ALL':
-                for areaname in areafilter.areas.keys():
-                    self.stackio('ADDSECTOR', areaname)
+                for name in areafilter.areas.keys():
+                    self.stackio('ADDSECTOR', name)
             # Add new sector to list.
             elif name in self.sectors:
                 return False, 'Sector %s already registered.' % name
             elif areafilter.hasArea(name):
                 if not self.sectors:
+
                     self.fconv = open('output/'+stack.scenname+'convergence.csv', 'w')
                     self.fsd = open('output/'+stack.scenname+'density.csv', 'w')
                     self.feff = open('output/'+stack.scenname+'efficiency.csv', 'w')
@@ -225,16 +223,29 @@ class Metrics(Entity):
                 idx = self.sectors.index(name)
                 self.sectors.pop(idx)
                 return True, 'Removed %s from sector list.' % name
-            return False, "No sector registered with name '%s'." % name
+            else:
+                return False, "No sector registered with name '%s'." % name
 
 def init_plugin():
+
     # Addtional initilisation code
     global metrics
     metrics = Metrics()
     # Configuration parameters
     config = {
         'plugin_name': 'METRICS',
-        'plugin_type': 'sim'
+        'plugin_type': 'sim',
+        'update_interval': 2.5,
+        'update': metrics.update,
+        'reset': metrics.reset
         }
 
-    return config
+    stackfunctions = {
+        'METRICS': [
+            'METRICS ADDSECTOR name',
+            'txt,txt',
+            metrics.stackio,
+            'Print something to the bluesky console based on the flag passed to MYFUN.']
+    }
+
+    return config, stackfunctions

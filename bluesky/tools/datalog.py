@@ -8,9 +8,8 @@ import itertools
 from datetime import datetime
 import numpy as np
 from bluesky import settings, stack
-from bluesky.core import varexplorer as ve
+from bluesky.tools import varexplorer as ve
 import bluesky as bs
-from bluesky.stack import command
 
 # Register settings defaults
 settings.set_variable_defaults(log_path='output')
@@ -24,26 +23,9 @@ periodicloggers = dict()
 allloggers = dict()
 
 
-@command(name='CRELOG')
-def crelogstack(name:'txt', dt:float=None, header:'string'=''):
-    ''' Create a new data logger.
-    
-        Arguments:
-        - name: The name of the logger
-        - dt: The logging time interval. When a value is given for dt
-              this becomes a periodic logger.
-        - header: A header text to put at the top of each log file
-    '''
-    if name in allloggers:
-        return False, f'Logger {name} already exists'
-
-    crelog(name, dt, header)
-    return True, f'Created {"periodic" if dt else ""} logger {name}'
-
-
 def crelog(name, dt=None, header=''):
-    ''' Create a new logger. '''
-    allloggers[name] = allloggers.get(name, CSVLogger(name, dt or 0.0, header))
+    ''' Create a new logger from the stack. '''
+    allloggers[name] = CSVLogger(name, dt or 0.0, header)
     if dt:
         periodicloggers[name] = allloggers[name]
 

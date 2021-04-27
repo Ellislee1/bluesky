@@ -3,29 +3,28 @@ Miscellaneous modules
 
 Modules:
      txt2alt(txt): read altitude[ft] from txt (FL ot ft)
-     txt2tas(spd,h): read CAS or Mach and convert to TAS for given altitude
+     txt2spd(spd,h): read CAS or Mach and convert to TAS for given altitude
      tim2txt(t)  : convert time[s] to HH:MM:SS.hh
      i2txt(i,n)  : convert integer to string of n chars with leading zeros
 
 Created by  : Jacco M. Hoekstra
 """
-from time import strftime, gmtime
-import numpy as np
 
-from .aero import cas2tas, mach2tas, kts, fpm, ft
-from .geo import magdec
+from numpy import *
+from time import strftime, gmtime
+from .aero import cas2tas, mach2tas, kts
 
 
 def txt2alt(txt):
-    """Convert text to altitude in meter: also FL300 => 30000. as float"""
+    """Convert text to altitude in ft: also FL300 => 30000. as float"""
     # First check for FL otherwise feet
     try:
         if txt.upper()[:2] == 'FL' and len(txt) >= 4:  # Syntax check Flxxx or Flxx
-            return 100.0 * int(txt[2:]) * ft
-        return float(txt) * ft
+            return 100. * int(txt[2:])
+        else:
+            return float(txt)
     except ValueError:
-        pass
-    raise ValueError(f'Could not parse "{txt}" as altitude"')
+        return -1e9
 
 
 def tim2txt(t):
@@ -35,92 +34,36 @@ def tim2txt(t):
 
 def txt2tim(txt):
     """Convert text to time in seconds:
-       SS.hh
-       MM:SS.hh
-       HH.MM.SS.hh
+       HH
+       HH:MM
+       HH:MM:SS
+       HH:MM:SS.hh
     """
-    timlst = txt.strip().split(":")
+    timlst = txt.split(":")
 
-    try:
-        # Always SS.hh
-        t = float(timlst[-1])
+    t = 0.
 
-        # MM
-        if len(timlst) > 1 and timlst[-2]:
-            t += 60.0 * int(timlst[-2])
+    # HH
+    if len(timlst[0])>0 and timlst[0].isdigit():
+        t = t+3600.*int(timlst[0])
 
-        # HH
-        if len(timlst) > 2 and timlst[-3]:
-            t += 3600.0 * int(timlst[-3])
+    # MM
+    if len(timlst)>1 and len(timlst[1])>0 and timlst[1].isdigit():
+        t = t+60.*int(timlst[1])
 
-        return t
-    except (ValueError, IndexError):
-        raise ValueError(f'Could not parse "{txt}" as time')
+    # SS.hh
+    if len(timlst)>2 and len(timlst[2])>0:
+        if timlst[2].replace(".","0").isdigit():
+            t = t + float(timlst[2])
 
-
-def txt2bool(txt):
-    ''' Convert string to boolean. '''
-    ltxt = txt.lower()
-    if ltxt in ('true', 'yes', 'y', '1', 'on'):
-        return True
-    if ltxt in ('false', 'no', 'n', '0', 'off'):
-        return False
-    raise ValueError(f'Could not parse {txt} as bool.')
-
+    return t
 
 def i2txt(i, n):
     """Convert integer to string with leading zeros to make it n chars long"""
     return '{:0{}d}'.format(i, n)
 
 
-def txt2hdg(txt, lat=None, lon=None):
-    ''' Convert text to true or magnetic heading.
-    Modified by : Yaofu Zhou'''
-    heading = float(txt.upper().replace("T", "").replace("M", ""))
-
-    if "M" in txt.upper():
-        if None in (lat, lon):
-            raise ValueError('txt2hdg needs a reference latitude and longitude '
-                             'when a magnetic heading is parsed.')
-        magnetic_declination = magdec(lat, lon)
-        heading = (heading + magnetic_declination) % 360.0
-
-    return heading
-
-
-def txt2vs(txt):
-    ''' Convert text to vertical speed.
-
-        Arguments:
-        - txt: text string representing vertical speed in feet per minute.
-
-        Returns:
-        - Vertical Speed (float) in meters per second.
-    '''
-    return fpm * float(txt)
-
-
-def txt2spd(txt):
-    """ Convert text to speed, keep type (EAS/TAS/MACH) unchanged.
-
-        Arguments:
-        - txt: text string representing speed
-
-        Returns:
-        - Speed in meters per second or Mach.
-    """
-    try:
-        txt = txt.upper()
-        spd = float(txt.replace("M0.", ".").replace("M", ".").replace("..", "."))
-
-        if not (0.1 < spd < 1.0 or txt.count("M") > 0):
-            spd *= kts
-        return spd
-    except ValueError:
-        raise ValueError(f'Could not parse {txt} as speed.')
-
-
-def txt2tas(txt, h):
+def txt2spd(txt, h):
     """Convert text to speed (EAS [kts]/MACH[-] to TAS[m/s])"""
     if len(txt) == 0:
         return -1.
@@ -138,20 +81,19 @@ def txt2tas(txt, h):
         else:
             spd_ = float(txt) * kts
             acspd = cas2tas(spd_, h)  # m/s
-    except ValueError:
+    except:
         return -1.
 
     return acspd
 
 
 def col2rgb(txt):
-    ''' Convert named color to R,G,B values (integer per component, 0-255) '''
     cols = {"black": (0, 0, 0), "white": (255, 255, 255), "green": (0, 255, 0),
             "red": (255, 0, 0), "blue": (0, 0, 255), "magenta": (255, 0, 255),
             "yellow": (240, 255, 127), "amber": (255, 255, 0), "cyan": (0, 255, 255)}
     try:
         rgb = cols[txt.lower().strip()]
-    except KeyError:
+    except:
         rgb = cols["white"]  # default
 
     return rgb
@@ -163,20 +105,21 @@ def degto180(angle):
 
 def degtopi(angle):
     """Change to domain -pi,pi """
-    return (angle + np.pi) % (2.0 * np.pi) - np.pi
+    return (angle + pi) % (2.*pi) - pi
 
 
 def findnearest(lat, lon, latarr, lonarr):
     """Find index of nearest postion in numpy arrays with lat and lon"""
     if len(latarr) > 0 and len(latarr) == len(lonarr):
-        coslat = np.cos(np.radians(lat))
-        dy = np.radians(lat - latarr)
-        dx = coslat * np.radians(degto180(lon - lonarr))
+        coslat = cos(radians(lat))
+        dy = radians(lat - latarr)
+        dx = coslat * radians(degto180(lon - lonarr))
         d2 = dx * dx + dy * dy
         idx = list(d2).index(d2.min())
 
         return idx
-    return -1
+    else:
+        return -1
 
 
 def cmdsplit(cmdline, trafids=None):
@@ -212,8 +155,7 @@ def txt2lat(lattxt):
     txt = lattxt.upper().replace("N", "").replace("S", "-")  # North positive, South negative
     neg = txt.count("-") > 0
 
-    # Use of "'" and '"' as delimiter for degrees/minutes/seconds
-    # (also accept degree symbol chr(176))
+    # Use of "'" and '"' as delimiter for degrees/minutes/seconds (also accept degree symbol chr(176))
     if txt.count("'") > 0 or txt.count('"') > 0 or txt.count(chr(176)) > 0:
         txt = txt.replace('"', "'").replace(chr(176),"'")# replace " or degree symbol and  by a '
         degs = txt.split("'")
@@ -228,7 +170,7 @@ def txt2lat(lattxt):
                 try:
                     lat = lat + f * abs(float(xtxt)) / float(div)
                     div = div * 60
-                except ValueError:
+                except:
                     print("txt2lat value error:",lattxt)
                     return 0.0
     else:
@@ -245,16 +187,15 @@ def txt2lon(lontxt):
         lon = float(lontxt)
 
     # Leading E will trigger error ansd means simply East,just as  W = West = Negative
-    except ValueError:
+    except:
 
         txt = lontxt.upper().replace("E", "").replace("W", "-")  # East positive, West negative
         neg = txt.count("-") > 0
 
-        # Use of "'" and '"' as delimiter for degrees/minutes/seconds
-        # (also accept degree symbol chr(176)). Also "W002'"
+        # Use of "'" and '"' as delimiter for degrees/minutes/seconds (also accept degree symbol chr(176))
+        # Also "W002'"
         if txt.count("'") > 0 or txt.count('"') or txt.count(chr(176))> 0:
-            # replace " or degree symbol and  by a '
-            txt = txt.replace('"', "'").replace(chr(176),"'")
+            txt = txt.replace('"', "'").replace(chr(176),"'")  # replace " or degree symbol and  by a '
             degs = txt.split("'")
             div = 1
             lon = 0.0
@@ -265,10 +206,10 @@ def txt2lon(lontxt):
             for xtxt in degs:
                 if len(xtxt)>0.0:
                     try:
-                        lon = lon + f * abs(float(xtxt)) / float(div)
-                    except ValueError:
-                        print("txt2lon value error:",lontxt)
-                        return 0.0
+                       lon = lon + f * abs(float(xtxt)) / float(div)
+                    except:
+                       print("txt2lon value error:",lontxt)
+                       return 0.0
 
                 div = div * 60
         else:  # Cope with "W65"without "'" or '"', also "-65" or "--65"
@@ -279,24 +220,21 @@ def txt2lon(lontxt):
                 else:
                     f = 1.
                 lon = f*abs(float(txt))
-            except ValueError:
+            except:
                 print("txt2lon value error:",lontxt)
                 return 0.0
 
     return lon
 
 def lat2txt(lat):
-    ''' Convert latitude into string (N/Sdegrees'minutes'seconds). '''
     d,m,s = float2degminsec(abs(lat))
     return "NS"[lat<0] + "%02d'%02d'"%(int(d),int(m))+str(s)+'"'
 
 def lon2txt(lon):
-    ''' Convert longitude into string (E/Wdegrees'minutes'seconds). '''
     d,m,s = float2degminsec(abs(lon))
     return "EW"[lon<0] + "%03d'%02d'"%(int(d),int(m))+str(s)+'"'
 
 def latlon2txt(lat,lon):
-    ''' Convert latitude and longitude in latlon string. '''
     return lat2txt(lat)+"  "+lon2txt(lon)
 
 def deg180(dangle):
@@ -304,24 +242,22 @@ def deg180(dangle):
     return (dangle + 180.) % 360. - 180.
 
 def float2degminsec(x):
-    ''' Convert an angle into a string describing the angle in degrees,
-        minutes, and seconds. '''
     deg     = int(x)
     minutes = int(x*60.) - deg *60.
     sec     = int(x*3600.) - deg*3600. - minutes*60.
     return deg,minutes,sec
 
 def findall(lst,x):
-    ''' Find indices of multiple occurences of x in lst. '''
-    idx = []
-    i = 0
-    found = True
-    while i<len(lst) and found:
-        try:
-            i = lst[i:].index(x)+i
-            idx.append(i)
-            i = i + 1
-            found = True
-        except ValueError:
-            found = False
-    return idx
+       # Find indices of multiple occurences of x in lst
+       idx = []
+       i = 0
+       found = True
+       while i<len(lst) and found:
+           try:
+               i = lst[i:].index(x)+i
+               idx.append(i)
+               i = i + 1
+               found = True
+           except:
+               found = False
+       return idx

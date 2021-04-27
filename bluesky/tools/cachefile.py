@@ -1,9 +1,12 @@
 from os import path
-import pickle
+try:
+    import pickle5 as pickle
+except ImportError:
+    import pickle
 
 from bluesky import settings
 
-## Default settings
+# Default settings
 settings.set_variable_defaults(cache_path='data/cache')
 
 
@@ -18,6 +21,7 @@ class CacheError(Exception):
 
 class CacheFile():
     ''' Convenience class for loading and saving pickle cache files. '''
+
     def __init__(self, fname, version_ref='1'):
         self.fname = path.join(settings.cache_path, fname)
         self.version_ref = version_ref

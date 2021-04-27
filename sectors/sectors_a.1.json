@@ -1,7 +1,7 @@
 {
     "sectors": [
         {
-            "name": "TEMP",
+            "name": "SEC1",
             "points": [
                 {
                     "lat": 46.2,

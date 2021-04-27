@@ -4,9 +4,10 @@
 import numpy as np
 # Import the global bluesky objects. Uncomment the ones you need
 from bluesky import traf, sim  #, settings, navdb, traf, sim, scr, tools
-from bluesky.tools import datalog, areafilter
-from bluesky.core import Entity, timed_function
+from bluesky.tools import datalog, areafilter, \
+    TrafficArrays, RegisterElementParameters
 from bluesky.tools.aero import ft,kts,nm,fpm
+from bluesky.tools.simtime import timed_function
 
 # Log parameters for the flight statistics log
 flstheader = \
@@ -64,7 +65,13 @@ def init_plugin():
         'plugin_name':     'AREA',
 
         # The type of this plugin. For now, only simulation plugins are possible.
-        'plugin_type':     'sim'
+        'plugin_type':     'sim',
+
+        # The update function is called after traffic is updated.
+        'update':          area.update,
+
+        # The reset function
+        'reset':           area.reset
         }
 
     stackfunctions = {
@@ -90,10 +97,10 @@ def init_plugin():
     # init_plugin() should always return these two dicts.
     return config, stackfunctions
 
-class Area(Entity):
+class Area(TrafficArrays):
     ''' Traffic area: delete traffic when it leaves this area (so not when outside)'''
     def __init__(self):
-        super().__init__()
+        super(Area, self).__init__()
         # Parameters of area
         self.active = False
         self.delarea = ''
@@ -107,7 +114,7 @@ class Area(Entity):
         self.flst = datalog.crelog('FLSTLOG', None, flstheader)
         self.conflog = datalog.crelog('CONFLOG', None, confheader)
 
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             self.insdel = np.array([], dtype=np.bool) # In deletion area or not
             self.insexp = np.array([], dtype=np.bool) # In experiment area or not
             self.oldalt = np.array([])
@@ -116,6 +123,7 @@ class Area(Entity):
             self.dstart2D = np.array([])
             self.dstart3D = np.array([])
             self.workstart = np.array([])
+            self.work = np.array([])
             self.entrytime = np.array([])
             self.create_time = np.array([])
 
@@ -130,14 +138,13 @@ class Area(Entity):
         self.confinside_all = 0
 
     def create(self, n=1):
-        ''' Create is called when new aircraft are created. '''
-        super().create(n)
+        super(Area, self).create(n)
         self.oldalt[-n:] = traf.alt[-n:]
         self.insdel[-n:] = False
         self.insexp[-n:] = False
         self.create_time[-n:] = sim.simt
 
-    @timed_function(name='AREA', dt=1.0)
+    @timed_function('AREA', dt=1.0)
     def update(self, dt):
         ''' Update flight efficiency metrics
             2D and 3D distance [m], and work done (force*distance) [J] '''
@@ -145,6 +152,7 @@ class Area(Entity):
             resultantspd = np.sqrt(traf.gs * traf.gs + traf.vs * traf.vs)
             self.distance2D += dt * traf.gs
             self.distance3D += dt * resultantspd
+            self.work += (traf.perf.thrust * dt * resultantspd)
 
             # Find out which aircraft are currently inside the experiment area, and
             # determine which aircraft need to be deleted.
@@ -159,8 +167,7 @@ class Area(Entity):
             # Count new conflicts where at least one of the aircraft is inside
             # the experiment area
             # Store statistics for all new conflict pairs
-            # Conflict pairs detected in the current timestep that were not yet
-            # present in the previous timestep
+            # Conflict pairs detected in the current timestep that were not yet present in the previous timestep
             confpairs_new = list(set(traf.cd.confpairs) - self.prevconfpairs)
             if confpairs_new:
                 # If necessary: select conflict geometry parameters for new conflicts
@@ -188,7 +195,7 @@ class Area(Entity):
             newentries = np.logical_not(self.insexp) * insexp
             self.dstart2D[newentries] = self.distance2D[newentries]
             self.dstart3D[newentries] = self.distance3D[newentries]
-            self.workstart[newentries] = traf.work[newentries]
+            self.workstart[newentries] = self.work[newentries]
             self.entrytime[newentries] = sim.simt
 
             # Log flight statistics when exiting experiment area
@@ -203,7 +210,7 @@ class Area(Entity):
                     sim.simt - self.entrytime[exits],
                     (self.distance2D[exits] - self.dstart2D[exits])/nm,
                     (self.distance3D[exits] - self.dstart3D[exits])/nm,
-                    (traf.work[exits] - self.workstart[exits])*1e-6,
+                    (self.work[exits] - self.workstart[exits])*1e-6,
                     traf.lat[exits],
                     traf.lon[exits],
                     traf.alt[exits]/ft,
@@ -211,10 +218,10 @@ class Area(Entity):
                     traf.vs[exits]/fpm,
                     traf.hdg[exits],
                     traf.cr.active[exits],
-                    traf.aporasas.alt[exits]/ft,
-                    traf.aporasas.tas[exits]/kts,
-                    traf.aporasas.vs[exits]/fpm,
-                    traf.aporasas.hdg[exits])
+                    traf.pilot.alt[exits]/ft,
+                    traf.pilot.tas[exits]/kts,
+                    traf.pilot.vs[exits]/fpm,
+                    traf.pilot.hdg[exits])
 
             # delete all aicraft in self.delidx
             if len(delidx) > 0:

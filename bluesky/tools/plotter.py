@@ -1,7 +1,7 @@
 ''' Sim-side implementation of graphical data plotter in BlueSky.'''
 from collections import defaultdict
 import bluesky as bs
-from bluesky.core import varexplorer as ve
+from bluesky.tools import varexplorer as ve
 
 
 # Globals
@@ -56,7 +56,7 @@ def update():
         bs.net.send_stream(streamname, data)
 
 
-class Plot:
+class Plot(object):
     ''' A plot object.
         Each plot object is used to manage the plot of one variable
         on the sim side.'''

@@ -1,10 +1,13 @@
 """ BlueSky aircraft performance calculations."""
+import os
+
 from math import *
 import numpy as np
 import bluesky as bs
+from bluesky.tools.simtime import timed_function
 from bluesky.tools.aero import ft, g0, a0, T0, rho0, gamma1, gamma2,  beta, R, \
-    kts, lbs, inch, sqft, fpm, vtas2cas, vcas2tas
-from bluesky.traffic.performance.perfbase import PerfBase
+    kts, lbs, inch, sqft, fpm, vtas2cas
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
 from bluesky.traffic.performance.legacy.performance import esf, phases, calclimits, PHASE
 from bluesky import settings
 
@@ -16,16 +19,16 @@ settings.set_variable_defaults(perf_path='data/performance/BS',
 coeffBS = CoeffBS()
 
 
-class Legacy(PerfBase):
+class PerfBS(TrafficArrays):
     def __init__(self):
-        super().__init__()
+        super(PerfBS,self).__init__()
         self.warned  = False    # Flag: Did we warn for default perf parameters yet?
         self.warned2 = False    # Flag: Use of piston engine aircraft?
 
         # prepare for coefficient readin
         coeffBS.coeff()
 
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             # index of aircraft types in library
             self.coeffidxlist = np.array([])
 
@@ -47,6 +50,7 @@ class Legacy(PerfBase):
             self.vmcr         = np.array([]) # min cruise spd
             self.vmap         = np.array([]) # min approach speed
             self.vmld         = np.array([]) # min landing spd
+            self.vmin         = np.array([]) # min speed over all phases
             self.vmo          = np.array([]) # max CAS
             self.mmo          = np.array([]) # max Mach
 
@@ -91,19 +95,13 @@ class Legacy(PerfBase):
             self.pf_flag = np.array([])
 
             self.engines = []           # avaliable engine type per aircraft type
-
-            # limit settings
-            self.limspd      = np.array([])  # limit speed
-            self.limspd_flag = np.array([], dtype=np.bool)  # flag for limit spd - we have to test for max and min
-            self.limalt      = np.array([])  # limit altitude
-            self.limalt_flag = np.array([])  # A need to limit altitude has been detected
-            self.limvs       = np.array([])  # limit vertical speed due to thrust limitation
-            self.limvs_flag  = np.array([])  # A need to limit V/S detected
         self.eta = 0.8          # propeller efficiency according to Raymer
         self.thrust_settings = np.array([1., 0.85, 0.07, 0.3 ]) # Thrust settings per flight phase according to ICAO
 
+        return
+
     def create(self, n=1):
-        super().create(n)
+        super(PerfBS,self).create(n)
         """CREATE NEW AIRCRAFT"""
         actypes = bs.traf.type[-n:]
         coeffidx = []
@@ -191,13 +189,14 @@ class Legacy(PerfBase):
         self.ffid[-n:]      = np.where(turboprops, 1. , coeffBS.ffid[jetidx]*coeffBS.n_eng[coeffidx]) / 60.0
         self.ffap[-n:]      = np.where(turboprops, 1. , coeffBS.ffap[jetidx]*coeffBS.n_eng[coeffidx]) / 60.0
 
-    def update(self, dt):
-        ''' Periodic update function for performance calculations. '''
+    @timed_function('performance', dt=settings.performance_dt)
+    def update(self, dt=settings.performance_dt):
+        """Aircraft performance"""
         swbada = False # no-bada version
         delalt = bs.traf.selalt - bs.traf.alt
         # allocate aircraft to their flight phase
-        self.phase, self.bank = phases(bs.traf.alt, bs.traf.gs, delalt,
-            bs.traf.cas, self.vmto, self.vmic, self.vmap, self.vmcr, self.vmld,
+        self.phase, self.bank = phases(bs.traf.alt, bs.traf.gs, delalt, 
+            bs.traf.cas, self.vmto, self.vmic, self.vmap, self.vmcr, self.vmld, 
             bs.traf.bank, bs.traf.bphase, bs.traf.swhdgsel,swbada)
 
         # AERODYNAMICS
@@ -250,15 +249,15 @@ class Legacy(PerfBase):
         descent = np.array(delalt< -epsalt)
 
         # energy share factor
-        delspd = bs.traf.aporasas.tas - bs.traf.tas
+        delspd = bs.traf.pilot.tas - bs.traf.tas
         selmach = bs.traf.selspd < 2.0
         self.ESF = esf(bs.traf.alt, bs.traf.M, climb, descent, delspd, selmach)
 
         # determine thrust
         self.thrust = (((bs.traf.vs*self.mass*g0)/(self.ESF*np.maximum(bs.traf.eps, bs.traf.tas))) + self.D)
         # determine thrust required to fulfill requests from pilot
-        # self.thrust_pilot = (((bs.traf.aporasas.vs*self.mass*g0)/(self.ESF*np.maximum(bs.traf.eps, bs.traf.aporasas.tas))) + self.D)
-        self.thrust_pilot = (((bs.traf.ap.vs*self.mass*g0)/(self.ESF*np.maximum(bs.traf.eps, bs.traf.aporasas.tas))) + self.D)
+        # self.thrust_pilot = (((bs.traf.pilot.vs*self.mass*g0)/(self.ESF*np.maximum(bs.traf.eps, bs.traf.pilot.tas))) + self.D)
+        self.thrust_pilot = (((bs.traf.ap.vs*self.mass*g0)/(self.ESF*np.maximum(bs.traf.eps, bs.traf.pilot.tas))) + self.D)
 
         # maximum thrust jet (Bruenig et al., p. 66):
         mt_jet = self.rated_thrust*(bs.traf.rho/rho0)**0.75
@@ -312,14 +311,14 @@ class Legacy(PerfBase):
         self.post_flight = np.where(descent, True, self.post_flight)
 
         # when landing, we would like to stop the aircraft.
-        bs.traf.aporasas.tas = np.where((bs.traf.alt <0.5)*(self.post_flight)*self.pf_flag, 0.0, bs.traf.aporasas.tas)
+        bs.traf.pilot.tas = np.where((bs.traf.alt <0.5)*(self.post_flight)*self.pf_flag, 0.0, bs.traf.pilot.tas)
         # the impulse for reducing the speed to 0 should only be given once,
         # otherwise taxiing will be impossible afterwards
         self.pf_flag = np.where ((bs.traf.alt <0.5)*(self.post_flight), False, self.pf_flag)
 
         return
 
-    def limits(self, intent_v, intent_vs, intent_h, ax):
+    def limits(self):
         """Flight envelope""" # Connect this with function limits in performance.py
 
         # combine minimum speeds and flight phases. Phases initial climb, cruise
@@ -338,26 +337,32 @@ class Legacy(PerfBase):
 
 
         # forwarding to tools
-        self.limspd, self.limspd_flag, self.limalt, \
-            self.limalt_flag, self.limvs, self.limvs_flag  =  calclimits(
-                vtas2cas(intent_v, bs.traf.alt), bs.traf.gs, \
-                self.vmto, self.vmin, self.vmo, self.mmo, \
-                bs.traf.M, bs.traf.alt, self.hmaxact, \
-                intent_h, intent_vs, self.maxthr, \
-                self.thrust_pilot, self.D, bs.traf.tas, \
-                self.mass, self.ESF, self.phase)
+        bs.traf.limspd,          \
+        bs.traf.limspd_flag,     \
+        bs.traf.limalt,          \
+        bs.traf.limalt_flag,     \
+        bs.traf.limvs,           \
+        bs.traf.limvs_flag  =  calclimits(vtas2cas(bs.traf.pilot.tas, bs.traf.alt), \
+                                        bs.traf.gs,          \
+                                        self.vmto,           \
+                                        self.vmin,           \
+                                        self.vmo,            \
+                                        self.mmo,            \
+                                        bs.traf.M,           \
+                                        bs.traf.alt,         \
+                                        self.hmaxact,        \
+                                        bs.traf.pilot.alt,   \
+                                        bs.traf.pilot.vs,    \
+                                        self.maxthr,         \
+                                        self.thrust_pilot,      \
+                                        self.D,              \
+                                        bs.traf.tas,         \
+                                        self.mass,           \
+                                        self.ESF,            \
+                                        self.phase)
 
-        # Update desired sates with values within the flight envelope
-        # When CAS is limited, it needs to be converted to TAS as only this TAS is used later on!
-        allowed_tas = np.where(self.limspd_flag, vcas2tas(self.limspd, bs.traf.alt), intent_v)
 
-        # Autopilot selected altitude [m]
-        allowed_alt = np.where(self.limalt_flag, self.limalt, intent_h)
-
-        # Autopilot selected vertical speed (V/S)
-        allowed_vs = np.where(self.limvs_flag, self.limvs, intent_vs)
-
-        return allowed_tas, allowed_vs, allowed_alt
+        return
 
     def acceleration(self):
         # define acceleration: aircraft taxiing and taking off use ground acceleration,

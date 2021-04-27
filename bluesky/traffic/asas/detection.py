@@ -3,18 +3,18 @@ import numpy as np
 
 import bluesky as bs
 from bluesky.tools.aero import ft, nm
-from bluesky.core import Entity
-from bluesky.stack import command
+from bluesky.tools.replaceable import ReplaceableSingleton
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
 
 
 bs.settings.set_variable_defaults(asas_pzr=5.0, asas_pzh=1000.0,
                                   asas_dtlookahead=300.0)
 
 
-class ConflictDetection(Entity, replaceable=True):
+class ConflictDetection(ReplaceableSingleton, TrafficArrays):
     ''' Base class for Conflict Detection implementations. '''
     def __init__(self):
-        super().__init__()
+        TrafficArrays.__init__(self)
         # [m] Horizontal separation minimum for detection
         self.rpz = bs.settings.asas_pzr * nm
         # [m] Vertical separation minimum for detection
@@ -40,7 +40,7 @@ class ConflictDetection(Entity, replaceable=True):
         self.lospairs_all = list()
 
         # Per-aircraft conflict data
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             self.inconf = np.array([], dtype=bool)  # In-conflict flag
             self.tcpamax = np.array([]) # Maximum time to CPA for aircraft in conflict
 
@@ -68,16 +68,14 @@ class ConflictDetection(Entity, replaceable=True):
         self.dtlookahead = bs.settings.asas_dtlookahead
         self.dtnolook = 0.0
 
-    @staticmethod
-    @command(name='CDMETHOD', aliases=('ASAS',))
-    def setmethod(name : 'txt' = ''):
-        ''' Select a Conflict Detection (CD) method. '''
+    @classmethod
+    def setmethod(cls, name=''):
+        ''' Select a CD method. '''
         # Get a dict of all registered CD methods
-        methods = ConflictDetection.derived()
+        methods = cls.derived()
         names = ['OFF' if n == 'CONFLICTDETECTION' else n for n in methods]
         if not name:
-            curname = 'OFF' if ConflictDetection.selected() is ConflictDetection \
-                else ConflictDetection.selected().__name__
+            curname = 'OFF' if cls.selected() is ConflictDetection else cls.selected().__name__
             return True, f'Current CD method: {curname}' + \
                          f'\nAvailable CD methods: {", ".join(names)}'
         # Check if the requested method exists
@@ -99,40 +97,30 @@ class ConflictDetection(Entity, replaceable=True):
         ConflictDetection.instance().clearconfdb()
         return True, f'Selected {method.__name__} as CD method.'
 
-    @command(name='ZONER')
-    def setrpz(self, radius: float = -1.0):
-        ''' Set the horizontal separation distance (i.e., the radius of the
-            protected zone) in nautical miles. '''
-        if radius < 0.0:
-            return True, f'ZONER[radius(nm)]\nCurrent PZ radius: {self.rpz / nm:.2f} NM'
-        self.rpz = radius * nm
-        return True, f'Setting PZ radius to {radius} NM'
+    def setrpz(self, value=None):
+        ''' Set the horizontal separation distance. '''
+        if value is None:
+            return True, ("ZONER [radius (nm)]\nCurrent PZ radius: %.2f NM" % (self.rpz / nm))
+        self.rpz = value * nm
 
-    @command(name='ZONEDH')
-    def sethpz(self, height: float = -1.0):
-        ''' Set the vertical separation distance (i.e., half of the protected
-            zone height) in feet. '''
-        if height < 0.0:
-            return True, f'ZONEDH [height (ft)]\nCurrent PZ height: {self.hpz / ft:.2f} ft'
-        self.hpz = height * ft
-        return True, f'Setting PZ height to {height} ft'
+    def sethpz(self, value=None):
+        ''' Set the vertical separation distance. '''
+        if value is None:
+            return True, ("ZONEDH [height (ft)]\nCurrent PZ height: %.2f ft" % (self.hpz / ft))
+        self.hpz = value * ft
 
-    @command(name='DTLOOK')
-    def setdtlook(self, time : 'time' = -1.0):
-        ''' Set the lookahead time (in [hh:mm:]sec) for conflict detection. '''
-        if time < 0.0:
-            return True, f'DTLOOK[time]\nCurrent value: {self.dtlookahead: .1f} sec'
-        self.dtlookahead = time
-        return True, f'Setting CD lookahead to {time} sec'
+    def setdtlook(self, value=None):
+        ''' Set the lookahead time for conflict detection. '''
+        if value is None:
+            return True, ("DTLOOK [time]\nCurrent value: %.1f sec" % self.dtlookahead)
+        self.dtlookahead = value
 
-    @command(name='DTNOLOOK')
-    def setdtnolook(self, time : 'time' = -1.0):
-        ''' Set the interval (in [hh:mm:]sec) in which conflict detection
-            is skipped after a conflict resolution. '''
-        if time < 0.0:
-            return True, f'DTNOLOOK[time]\nCurrent value: {self.dtasas: .1f} sec'
-        self.dtnolook = time
-        return True, f'Setting CD no-look to {time} sec'
+    def setdtnolook(self, value=None):
+        ''' Set the interval in which conflict detection is skipped after a
+            conflict resolution. '''
+        if value is None:
+            return True, ("DTNOLOOK [time]\nCurrent value: %.1f sec" % self.dtasas)
+        self.dtnolook = value
 
     def update(self, ownship, intruder):
         ''' Perform an update step of the Conflict Detection implementation. '''
@@ -153,7 +141,8 @@ class ConflictDetection(Entity, replaceable=True):
         self.lospairs_unique = lospairs_unique
 
     def detect(self, ownship, intruder, rpz, hpz, dtlookahead):
-        ''' Detect any conflicts between ownship and intruder.
+        ''' 
+            Detect any conflicts between ownship and intruder.
             This function should be reimplemented in a subclass for actual
             detection of conflicts. See for instance
             bluesky.traffic.asas.statebased.

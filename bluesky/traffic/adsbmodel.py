@@ -2,16 +2,16 @@
 import numpy as np
 import bluesky as bs
 from bluesky.tools.aero import ft
-from bluesky.core import Entity
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
+from bluesky.tools.replaceable import ReplaceableSingleton
 
-
-class ADSB(Entity, replaceable=True):
+class ADSB(ReplaceableSingleton, TrafficArrays):
     """ ADS-B model. Implements real-life limitations of ADS-B communication."""
 
     def __init__(self):
-        super().__init__()
+        TrafficArrays.__init__(self)
         # From here, define object arrays
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             # Most recent broadcast data
             self.lastupdate = np.array([])
             self.lat        = np.array([])
@@ -31,7 +31,7 @@ class ADSB(Entity, replaceable=True):
         self.trunctime  = 0  # [s]
 
     def create(self, n=1):
-        super().create(n)
+        super(ADSB, self).create(n)
 
         self.lastupdate[-n:] = -self.trunctime * np.random.rand(n)
         self.lat[-n:] = bs.traf.lat[-n:]

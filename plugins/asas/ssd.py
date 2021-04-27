@@ -26,7 +26,8 @@ def init_plugin():
         'plugin_type':     'sim'
     }
 
-    return config
+    # init_plugin() should always return these two dicts.
+    return config, {}
 
 
 class SSD(ConflictResolution):

@@ -1,21 +1,24 @@
 """ BlueSky aircraft performance calculations using BADA 3.xx."""
 import numpy as np
 import bluesky as bs
-from bluesky.tools.aero import kts, ft, g0, vtas2cas, vcas2tas
-from bluesky.traffic.performance.perfbase import PerfBase
+from bluesky.tools.simtime import timed_function
+from bluesky.tools.aero import kts, ft, g0, vtas2cas
+from bluesky.tools.trafficarrays import TrafficArrays, RegisterElementParameters
 from bluesky.traffic.performance.legacy.performance import esf, phases, calclimits, PHASE
 from bluesky import settings
 from . import coeff_bada
 
 # Register settings defaults
-settings.set_variable_defaults(perf_path_bada='data/performance/BADA',
+settings.set_variable_defaults(perf_path_bada='data/performance/BADA', 
                                performance_dt=1.0, verbose=False)
 
-if not coeff_bada.check(settings.perf_path_bada):
-    raise ImportError('BADA performance model: Error trying to find BADA files in ' + settings.perf_path_bada + '!')
+if not coeff_bada.init(settings.perf_path_bada):
+    raise ImportError('BADA performance model: Error loading BADA files from ' + settings.perf_path_bada + '!')
+else:
+    print('Using BADA performance model.')
 
 
-class BADA(PerfBase):
+class PerfBADA(TrafficArrays):
     """
     Aircraft performance implementation based on BADA.
     Methods:
@@ -32,10 +35,7 @@ class BADA(PerfBase):
         EEC Technical/Scientific Report No. 14/04/24-44 edition, 2014.
     """
     def __init__(self):
-        super().__init__()
-        # Load coefficient files if we haven't yet
-        coeff_bada.init(settings.perf_path_bada)
-
+        super(PerfBADA, self).__init__()
         self.warned = False     # Flag: Did we warn for default perf parameters yet?
         self.warned2 = False    # Flag: Use of piston engine aircraft?
 
@@ -43,7 +43,7 @@ class BADA(PerfBase):
         self.warned2 = False        # Flag: Did we warn for default engine parameters yet?
 
         # Register the per-aircraft parameter arrays
-        with self.settrafarrays():
+        with RegisterElementParameters(self):
             # engine
             self.jet        = np.array([])
             self.turbo      = np.array([])
@@ -63,9 +63,11 @@ class BADA(PerfBase):
             self.vmcr       = np.array([])  # min cruise spd [m/s]
             self.vmap       = np.array([])  # min approach spd [m/s]
             self.vmld       = np.array([])  # min landing spd [m/s]
+            self.vmin       = np.array([])  # min speed over all phases [m/s]
 
             self.vmo        = np.array([])   # max operating speed [m/s]
             self.mmo        = np.array([])   # max operating mach number [-]
+            self.vmax       = np.array([])   # max speed (copy of vmo)
             self.hmax       = np.array([])   # max. alt above standard MSL (ISA) at MTOW [m]
             self.hmaxact    = np.array([])   # max. alt depending on temperature gradient [m]
             self.hmo        = np.array([])   # max. operating alt abov standard MSL [m]
@@ -156,19 +158,11 @@ class BADA(PerfBase):
             self.len         = np.array([])   # aircraft length[m]
             self.gr_acc      = np.array([])   # ground acceleration [m/s^2]
 
-            # limit settings
-            self.limspd      = np.array([])  # limit speed
-            self.limspd_flag = np.array([], dtype=np.bool)  # flag for limit spd - we have to test for max and min
-            self.limalt      = np.array([])  # limit altitude
-            self.limalt_flag = np.array([])  # A need to limit altitude has been detected
-            self.limvs       = np.array([])  # limit vertical speed due to thrust limitation
-            self.limvs_flag  = np.array([])  # A need to limit V/S detected
-
     def engchange(self, acid, engid=None):
         return False, "BADA performance model doesn't allow changing engine type"
 
     def create(self, n=1):
-        super().create(n)
+        super(PerfBADA, self).create(n)
         """CREATE NEW AIRCRAFT"""
         actypes = bs.traf.type[-n:]
 
@@ -217,7 +211,7 @@ class BADA(PerfBase):
         self.vmin[-n:]      = 0.0
         self.vmo[-n:]       = coeff.VMO * kts
         self.mmo[-n:]       = coeff.MMO
-        self.vmax[-n:]      = self.vmo[-n:]
+        self.vmax[-n:]      = self.vmo
 
         # max. altitude parameters
         self.hmo[-n:]       = coeff.h_MO * ft
@@ -325,13 +319,14 @@ class BADA(PerfBase):
         # for now, BADA aircraft have the same acceleration as deceleration
         self.gr_acc[-n:]    = coeff.gr_acc
 
-    def update(self, dt):
-        ''' Periodic update function for performance calculations. '''
+    @timed_function('performance', dt=settings.performance_dt)
+    def update(self, dt=settings.performance_dt):
+        """AIRCRAFT PERFORMANCE"""
         # BADA version
         swbada = True
         delalt = bs.traf.selalt - bs.traf.alt
         # flight phase
-        self.phase, self.bank = phases(bs.traf.alt, bs.traf.gs, delalt,
+        self.phase, self.bank = phases(bs.traf.alt, bs.traf.gs, delalt, 
             bs.traf.cas, self.vmto, self.vmic, self.vmap, self.vmcr, self.vmld,
             bs.traf.bank, bs.traf.bphase, bs.traf.swhdgsel, swbada)
 
@@ -373,7 +368,7 @@ class BADA(PerfBase):
         lvl = np.array(np.abs(delalt)<0.0001)*1
 
         # energy share factor
-        delspd = bs.traf.aporasas.tas - bs.traf.tas
+        delspd = bs.traf.pilot.tas - bs.traf.tas
         selmach = bs.traf.selspd < 2.0
         self.ESF = esf(bs.traf.alt, bs.traf.M, climb, descent, delspd, selmach)
 
@@ -452,7 +447,7 @@ class BADA(PerfBase):
         # switch for given vertical speed selvs
         if (bs.traf.selvs.any()>0.) or (bs.traf.selvs.any()<0.):
             # thrust = f(selvs)
-            T = ((bs.traf.selvs!=0)*(((bs.traf.aporasas.vs*self.mass*g0)/     \
+            T = ((bs.traf.selvs!=0)*(((bs.traf.pilot.vs*self.mass*g0)/     \
                       (self.ESF*np.maximum(bs.traf.eps,bs.traf.tas)*cpred)) \
                       + self.D)) + ((bs.traf.selvs==0)*T)
 
@@ -542,7 +537,7 @@ class BADA(PerfBase):
         self.post_flight = np.where(descent, True, self.post_flight)
 
         # when landing, we would like to stop the aircraft.
-        bs.traf.aporasas.tas = np.where((bs.traf.alt <0.5)*(self.post_flight)*self.pf_flag, 0.0, bs.traf.aporasas.tas)
+        bs.traf.pilot.tas = np.where((bs.traf.alt <0.5)*(self.post_flight)*self.pf_flag, 0.0, bs.traf.pilot.tas)
 
 
         # otherwise taxiing will be impossible afterwards
@@ -552,7 +547,8 @@ class BADA(PerfBase):
 
         return
 
-    def limits(self, intent_v, intent_vs, intent_h, ax):
+
+    def limits(self):
         """FLIGHT ENVELPOE"""
         # summarize minimum speeds - ac in ground mode might be pushing back
         self.vmin =  (self.phase == 1) * self.vmto + (self.phase == 2) * self.vmic + (self.phase == 3) * self.vmcr + \
@@ -573,27 +569,32 @@ class BADA(PerfBase):
         self.hmaxact = (self.hmax==0)*self.hmo +(self.hmax !=0)*np.minimum(self.hmo, self.hact)
 
         # forwarding to tools
-        self.limspd, self.limspd_flag, self.limalt, \
-            self.limalt_flag, self.limvs, self.limvs_flag = calclimits(
-                vtas2cas(intent_v, bs.traf.alt), bs.traf.gs,
-                self.vmto, self.vmin, self.vmo, self.mmo,
-                bs.traf.M, bs.traf.alt, self.hmaxact,
-                intent_h, intent_vs, self.maxthr,
-                self.thrust, self.D, bs.traf.tas,
-                self.mass, self.ESF, self.phase)
+        # forwarding to tools
+        bs.traf.limspd,          \
+        bs.traf.limspd_flag,     \
+        bs.traf.limalt,          \
+        bs.traf.limalt_flag,      \
+        bs.traf.limvs,           \
+        bs.traf.limvs_flag  =  calclimits(vtas2cas(bs.traf.pilot.tas, bs.traf.alt),   \
+                                        bs.traf.gs,            \
+                                        self.vmto,             \
+                                        self.vmin,             \
+                                        self.vmo,              \
+                                        self.mmo,              \
+                                        bs.traf.M,             \
+                                        bs.traf.alt,           \
+                                        self.hmaxact,          \
+                                        bs.traf.pilot.alt,     \
+                                        bs.traf.pilot.vs,      \
+                                        self.maxthr,           \
+                                        self.thrust,              \
+                                        self.D,                \
+                                        bs.traf.tas,           \
+                                        self.mass,             \
+                                        self.ESF,              \
+                                        self.phase)
 
-        # Update desired sates with values within the flight envelope
-        # When CAS is limited, it needs to be converted to TAS as only this TAS is used later on!
-        allowed_tas = np.where(self.limspd_flag, vcas2tas(
-            self.limspd, bs.traf.alt), intent_v)
-
-        # Autopilot selected altitude [m]
-        allowed_alt = np.where(self.limalt_flag, self.limalt, intent_h)
-
-        # Autopilot selected vertical speed (V/S)
-        allowed_vs = np.where(self.limvs_flag, self.limvs, intent_vs)
-
-        return allowed_tas, allowed_vs, allowed_alt
+        return
 
     def acceleration(self):
         # define acceleration: aircraft taxiing and taking off use ground acceleration,
